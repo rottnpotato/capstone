@@ -790,11 +790,14 @@ export default function AdminDashboard() {
 
               <div>
                 <label className="block text-sm font-medium mb-1">Restock Quantity</label>
+                <label className="block text-sm font-medium mb-1" htmlFor="restock-quantity">Restock Quantity</label>
                 <input
+                  id="restock-quantity"
                   type="number"
                   className="w-full p-2 border rounded-md"
                   defaultValue={selectedInventory.Threshold - selectedInventory.Stock}
                   min="1"
+                  placeholder="Enter quantity"
                 />
               </div>
             </div>

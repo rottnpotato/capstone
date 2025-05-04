@@ -129,7 +129,7 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
         scrolled ? "bg-white/90 backdrop-blur-md shadow-sm" : "bg-white/80"
       }`}
     >
-      <div className="container mx-auto px-4">
+      <div className="container mx-auto px-4 min-w-screen">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center">
             <Link href="/" className="flex items-center gap-2">
@@ -146,7 +146,7 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
               <></>
             ) : (
               <Link
-                href={`/${userType}`}
+                href={`/${userType === "member" ? "members" : userType}`}
                 className={`px-3 py-2 text-sm font-medium transition-colors flex items-center ${
                   pathname === `/${userType}`
                     ? "text-amber-600 bg-amber-50 rounded-md"

@@ -35,6 +35,16 @@ export class ProductRepository {
     }
   }
 
+  static async GetAllCategory() {
+    try {
+      return await db.select()
+        .from(Categories);
+    } catch (error) {
+      console.error(`Error getting category :`, error);
+      throw error;
+    }
+  }
+
   /**
    * Get a product by ID
    */

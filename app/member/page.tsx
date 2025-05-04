@@ -323,7 +323,7 @@ export default function MemberDashboard() {
                 value="purchases"
                 onClick={() => {
                   setActiveTab("purchases")
-                  window.location.href = "/members/purchases"
+                  // window.location.href = "/members/purchases"
                 }}
               >
                 Purchase History
@@ -332,7 +332,7 @@ export default function MemberDashboard() {
                 value="credit"
                 onClick={() => {
                   setActiveTab("credit")
-                  window.location.href = "/members/credit"
+                  // window.location.href = "/members/credit"
                 }}
               >
                 Credit Management
@@ -880,6 +880,7 @@ export default function MemberDashboard() {
                   <div>
                     <label className="block text-sm font-medium mb-1">Amount (₱)</label>
                     <input
+                      title="Payment Amount"
                       type="number"
                       className="w-full p-2 border rounded-md"
                       value={paymentAmount}
@@ -996,6 +997,7 @@ export default function MemberDashboard() {
               <div>
                 <label className="block text-sm font-medium mb-1">Requested Increase Amount (₱)</label>
                 <input
+                  title="Credit Increase Amount"
                   type="number"
                   className="w-full p-2 border rounded-md"
                   value={creditIncreaseAmount}

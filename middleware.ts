@@ -57,7 +57,7 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/', request.url));
     }
     
-    if ((pathname.startsWith('/member') || pathname.startsWith('/members')) && userRole !== 'Member') {
+    if ((pathname.startsWith('/members') || pathname.startsWith('/members')) && userRole !== 'Members') {
       // Redirect non-member users away from member routes
       return NextResponse.redirect(new URL('/', request.url));
     }
@@ -70,7 +70,7 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/admin', request.url));
     } else if (userRole === 'Cashier') {
       return NextResponse.redirect(new URL('/pos', request.url));
-    } else if (userRole === 'Member') {
+    } else if (userRole === 'Members') {
       return NextResponse.redirect(new URL('/members', request.url));
     }
     

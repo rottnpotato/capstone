@@ -25,7 +25,7 @@ export async function LoginUser(prevState: ActionResult | undefined, formData: F
   const validatedFields = LoginSchema.safeParse({
     email: formData.get('email'),
     password: formData.get('password'),
-  });
+  }); // Log the hashed password
 
   if (!validatedFields.success) {
     // Concatenate error messages
@@ -40,6 +40,7 @@ export async function LoginUser(prevState: ActionResult | undefined, formData: F
 
   try {
     // 1. Find user by email
+    
     const user = await db.query.Users.findFirst({
       where: eq(Users.Email, email),
       with: {
@@ -50,6 +51,8 @@ export async function LoginUser(prevState: ActionResult | undefined, formData: F
     if (!user) {
       return { success: false, message: "Invalid email or password." };
     }
+
+ 
 
     // 2. Compare password hash
     const isPasswordValid = await bcrypt.compare(password, user.PasswordHash);
@@ -63,9 +66,9 @@ export async function LoginUser(prevState: ActionResult | undefined, formData: F
     let redirectUrl = '/login'; // Default redirect if role unknown
     if (user.role === 'Admin') {
       redirectUrl = '/admin';
-    } else if (user.role === 'Cashier') { // Assuming 'Cashier' for POS users
+    } else if (user.role === 'Cashier') { 
       redirectUrl = '/pos';
-    } else if (user.role === 'Member') { // If members can also log in via Users table
+    } else if (user.role === 'Member') { 
       redirectUrl = '/members';
     }
 

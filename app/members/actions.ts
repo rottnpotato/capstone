@@ -129,8 +129,8 @@ export async function GetCurrentMemberData(): Promise<MemberData | null> {
     
     // Calculate credit-related values
     const creditBalance = parseFloat(member.CreditBalance || '0');
-    const creditLimit = 5000; // This is hardcoded for now, should come from the database
-    const availableCredit = creditLimit - creditBalance;
+    const creditLimit = 0; // This is hardcoded for now, should come from the database
+    const availableCredit = creditBalance;
     const creditUtilization = Math.round((creditBalance / creditLimit) * 100);
     
     // Create upcoming payments based on credit purchases

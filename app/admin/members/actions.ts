@@ -4,12 +4,12 @@ import { db } from '@/db';
 import { Members, Users, Roles } from '@/db/schema';
 import { eq, sql, desc, asc, ilike, or, and, count } from 'drizzle-orm';
 
-// Define the structure of the member data we want to return
-// Match the mock data structure in page.tsx as closely as possible
+// structure of the member data we want to return
+// Match the mock data structure in page.tsx 
 export interface MemberForAdminPage {
-  id: string; // Using MemberId as string
+  id: string;
   name: string;
-  memberID: string; // Use MemberId again or a specific Member code if available
+  memberID: string; 
   email: string;
   phone: string | null;
   joinDate: string; // Format date as string
@@ -24,7 +24,7 @@ export interface MemberForAdminPage {
     amount: number;
     items: number;
   }[];
-  // Add other computed or related fields if needed
+  
 }
 
 interface GetMembersParams {

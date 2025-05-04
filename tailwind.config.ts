@@ -19,6 +19,18 @@ const config = {
       },
     },
     extend: {
+      minWidth: {
+        0: "0",
+        64: "16rem",
+        96: "24rem",
+        128: "32rem",
+        160: "40rem",
+        192: "48rem",
+        224: "56rem",
+        256: "64rem",
+        screen: "100vw",
+        full: "100%",
+      },
       fontFamily: {
         sans: ["var(--font-figtree)", "system-ui", "sans-serif"],
       },

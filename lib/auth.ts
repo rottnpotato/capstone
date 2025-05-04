@@ -37,8 +37,8 @@ export async function AuthenticateUser(email: string, password: string) {
 
 
     //create a hash of the password
-    // const passwordHash = await bcrypt.hash('password123', 10);
-    // console.log(passwordHash);
+    const passwordHash = await bcrypt.hash('password123', 10);
+    console.log(passwordHash);
     // Verify password
     const passwordMatches = await bcrypt.compare(password, user.PasswordHash);
     if (!passwordMatches) {
@@ -71,7 +71,7 @@ export async function AuthenticateUser(email: string, password: string) {
       redirectUrl = '/admin';
     } else if (role.Name === 'Cashier') {
       redirectUrl = '/pos';
-    } else if (role.Name === 'Member') {
+    } else if (role.Name === 'Members') {
       redirectUrl = '/members';
     }
     

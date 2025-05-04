@@ -43,6 +43,15 @@ interface Product {
   lastRestocked: string
   sku: string
 }
+// Category type definition
+interface Category {
+  id: string
+  name: string
+  description: string
+  createdAt: string
+  updatedAt: string
+}
+
 
 export default function InventoryPage() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -126,6 +135,12 @@ export default function InventoryPage() {
     // ... other sample products with SKU added
   ])
 
+  const [category, setCategory] = useState<Category[]>([
+ 
+    // Initial sample products (keep for testing, will be replaced with API data)
+    // ... other sample products with SKU added
+  ])
+
   // Fetch products from API on component mount
   useEffect(() => {
     const fetchProducts = async () => {
@@ -176,11 +191,52 @@ export default function InventoryPage() {
       }
     }
 
+    const fetchCategories = async () => {
+      // setIsLoadingProducts(true)
+      try {
+        // Call the products API endpoint
+        const response = await fetch('/api/category')
+        if (!response.ok) {
+          throw new Error('Failed to fetch products')
+        }
+        
+        const data = await response.json()
+        if (data.categories && Array.isArray(data.categories)) {
+          // Map database columns to frontend model
+          const formattedCategories: Category[] = data.categories.map((c: Category) => {
+            return {
+              id: c.id.toString(),
+              name: c.name || 'Unnamed Category',
+              description: c.description || '',
+              createdAt: c.createdAt || new Date().toLocaleDateString(),
+              updatedAt: c.updatedAt || new Date().toLocaleDateString()
+            };
+          });
+
+          setCategory(formattedCategories);
+          console.log('Loaded Category:', formattedCategories);
+        } else {
+          console.log('No categories found or invalid data structure:', data);
+        }
+      } catch (error) {
+        console.error('Error fetching category:', error)
+        toast({
+          title: "Error",
+          description: "Failed to load category. Please try again.",
+          variant: "destructive"
+        })
+      } finally {
+        setIsLoadingProducts(false)
+      }
+    }
+
+    fetchCategories()
+
     fetchProducts()
   }, [toast])
 
   // Get unique categories from products
-  const categories = ["all", ...Array.from(new Set(products.map((product) => product.category)))]
+  const categories = ["all", ...Array.from(new Set(category.map((category) => category.name)))]
 
   // Filter and sort products
   const filteredProducts = products
@@ -1133,6 +1189,7 @@ export default function InventoryPage() {
                         <p className="text-white font-medium">Change Image</p>
                       </div>
                       <input 
+                        title="image"
                         type="file" 
                         ref={editFileInputRef} 
                         className="hidden" 
@@ -1177,6 +1234,7 @@ export default function InventoryPage() {
                     <div className="grid gap-2">
                       <label className="text-sm font-medium">SKU (Stock Keeping Unit)</label>
                       <Input 
+                        title="sku"
                         placeholder="Enter SKU" 
                         name="sku"
                         value={editProduct.sku}
@@ -1301,6 +1359,7 @@ export default function InventoryPage() {
                 </>
               )}
               <input 
+                title="image"
                 type="file" 
                 ref={fileInputRef} 
                 className="hidden" 

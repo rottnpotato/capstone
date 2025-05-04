@@ -378,6 +378,8 @@ export default function POSPage() {
                   />
                   {searchQuery && (
                     <button
+                      title="Clear Search"
+                      name="button"
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                       onClick={() => setSearchQuery("")}
                     >
@@ -867,11 +869,11 @@ export default function POSPage() {
                     <div className="mt-2">
                       <span className="text-gray-600">Available Credit:</span>
                       <span className="font-medium ml-1">
-                        ₱{(selectedMember.CreditLimit - selectedMember.CurrentCredit).toFixed(2)}
+                        ₱{(selectedMember.CurrentCredit - selectedMember.CreditLimit).toFixed(2)}
                       </span>
                     </div>
 
-                    {total > selectedMember.CreditLimit - selectedMember.CurrentCredit && (
+                    {total > selectedMember.CurrentCredit - selectedMember.CreditLimit && (
                       <div className="mt-2 text-red-500 text-sm">
                         <Info className="h-4 w-4 inline mr-1" />
                         Insufficient credit available
@@ -894,7 +896,7 @@ export default function POSPage() {
                 (paymentMethod === "credit" && !selectedMember) ||
                 (paymentMethod === "credit" &&
                   selectedMember &&
-                  total > selectedMember.CreditLimit - selectedMember.CurrentCredit) ||
+                  total > selectedMember.CurrentCredit - selectedMember.CreditLimit) ||
                 (paymentMethod === "cash" && (typeof cashAmount !== "number" || cashAmount < total)) ||
                 (paymentMethod === "cash" && isMemberPurchase && !selectedMember)
               }

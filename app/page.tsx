@@ -61,14 +61,14 @@ export default function Home() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
+    <div className="min-w-screen min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
       {/* Navigation */}
       <header
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
           scrolled ? "bg-white/80 backdrop-blur-md shadow-sm" : "bg-transparent"
         }`}
       >
-        <div className="container flex h-16 items-center justify-between">
+        <div className="container flex h-16 items-center justify-between min-w-screen">
           <div className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center">
               <CreditCard className="h-4 w-4 text-white" />
@@ -101,7 +101,7 @@ export default function Home() {
 
       {/* Hero Section */}
       <section className="pt-32 pb-20">
-        <div className="container">
+        <div className="container min-w-screen">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -421,7 +421,7 @@ export default function Home() {
 
       {/* Login Section */}
       <section id="login" className="py-20 bg-white">
-        <div className="container">
+        <div className="container min-w-screen">
           <div className="text-center max-w-2xl mx-auto mb-16">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -452,7 +452,7 @@ export default function Home() {
 
       {/* Contact Section */}
       <section id="contact" className="py-20 bg-gradient-to-br from-amber-500 to-orange-600 text-white">
-        <div className="container">
+        <div className="container min-w-screen">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -580,7 +580,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="bg-gray-900 text-white">
-        <div className="container">
+        <div className="container min-w-screen">
           {/* Top Footer */}
           <div className="py-16">
             <motion.div

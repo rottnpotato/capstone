@@ -215,13 +215,14 @@ export default function MemberDashboard() {
                 <Button
                   className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
                   onClick={() => makePayment()}
+                  disabled={true}
                 >
                   Make a Payment
                 </Button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-                <Card className="border-none shadow-sm">
+                {/* <Card className="border-none shadow-sm">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -262,7 +263,7 @@ export default function MemberDashboard() {
                     </div>
                     <Progress value={memberData.creditUtilization} className="h-2" />
                   </CardContent>
-                </Card>
+                </Card> */}
               </div>
             </motion.div>
           </div>
@@ -277,7 +278,7 @@ export default function MemberDashboard() {
                 value="purchases"
                 onClick={() => {
                   setActiveTab("purchases")
-                  window.location.href = "/members/purchases"
+                  // window.location.href = "/members/purchases"
                 }}
               >
                 Purchase History
@@ -286,7 +287,7 @@ export default function MemberDashboard() {
                 value="credit"
                 onClick={() => {
                   setActiveTab("credit")
-                  window.location.href = "/members/credit"
+                  // window.location.href = "/members/credit"
                 }}
               >
                 Credit Management
@@ -492,6 +493,7 @@ export default function MemberDashboard() {
                                           description: `Payment for ${purchase.id}`,
                                           id: `PAY-${purchase.id.split("-")[1]}`,
                                         })}
+                                      disabled={true}
                                     >
                                       Pay Now
                                     </Button>
@@ -617,6 +619,7 @@ export default function MemberDashboard() {
                                   size="sm"
                                   className="mt-2 h-8 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
                                   onClick={() => makePayment(payment)}
+                                  disabled={true}
                                 >
                                   Pay Now
                                 </Button>
@@ -789,6 +792,7 @@ export default function MemberDashboard() {
                       id: `PAY-${selectedPurchase.id.split('-')[1]}`,
                     })
                   }}
+                  disabled={true}
                   className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
                 >
                   Pay Now
@@ -816,7 +820,7 @@ export default function MemberDashboard() {
           <div className="bg-white rounded-lg w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-bold">Make a Payment</h3>
-              <Button variant="ghost" size="sm" onClick={closeModal} className="h-8 w-8 p-0">
+              <Button variant="ghost" size="sm" onClick={closeModal} className="h-8 w-8 p-0" >
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -834,6 +838,7 @@ export default function MemberDashboard() {
                   <div>
                     <label className="block text-sm font-medium mb-1">Amount (₱)</label>
                     <input
+                      title="Payment Amount"
                       type="number"
                       className="w-full p-2 border rounded-md"
                       value={paymentAmount}
@@ -950,6 +955,7 @@ export default function MemberDashboard() {
               <div>
                 <label className="block text-sm font-medium mb-1">Requested Increase Amount (₱)</label>
                 <input
+                  title="Credit Increase Amount"
                   type="number"
                   className="w-full p-2 border rounded-md"
                   value={creditIncreaseAmount}

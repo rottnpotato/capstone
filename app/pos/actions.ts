@@ -164,7 +164,7 @@ export async function GetMembers(): Promise<Member[]> {
       Name: member.Name,
       MemberId: `M${member.MemberId.toString().padStart(3, '0')}`, // Format to match mock data
       Email: member.Email,
-      CreditLimit: 5000, // Placeholder - add actual credit limit field to DB
+      CreditLimit: 0, // Placeholder - add actual credit limit field to DB
       CurrentCredit: parseFloat(member.CreditBalance || "0"),
     }));
   } catch (error) {
@@ -190,7 +190,7 @@ export async function SearchMembers(searchQuery: string): Promise<Member[]> {
       Name: member.Name,
       MemberId: `M${member.MemberId.toString().padStart(3, '0')}`, // Format to match mock data
       Email: member.Email,
-      CreditLimit: 5000, // Placeholder - add actual credit limit field to DB
+      CreditLimit: 0, // Placeholder - add actual credit limit field to DB
       CurrentCredit: parseFloat(member.CreditBalance || "0"),
     }));
   } catch (error) {
@@ -313,7 +313,7 @@ export async function SendReceiptEmail(
   customerName: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log(`[EMAIL] Preparing to send receipt email for transaction ${transactionId}`);
+    console.log(` Preparing to send receipt email for transaction ${transactionId}`);
     console.log(`[EMAIL] Receipt email target: ${customerEmail} (${customerName})`);
     
     // Get transaction details
@@ -392,6 +392,8 @@ export async function SendReceiptEmail(
       customerName,
       receiptData
     );
+
+    console.log(`[EMAIL] Email send result: ${emailResult}`);
     
     const duration = Date.now() - startTime;
     console.log(`[EMAIL] Receipt email sent successfully to ${customerEmail}`);
