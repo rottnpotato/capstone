@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1746261116073,
+      "tag": "0000_keen_silverclaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1696687290012,
+      "tag": "0001_add_image_supplier_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1746346200000,
+      "tag": "0002_add_user_id_to_members",
+      "breakpoints": true
+    }
+  ]
+}
