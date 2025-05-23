@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db/connection';
 import { Products, Categories } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import { ProductRepository } from '@/db/repositories/ProductRepository';
 
 /**
  * GET handler for retrieving a specific product by ID
@@ -48,6 +49,8 @@ export async function GET(
       description: productItem.Products.Description || '',
       supplier: productItem.Products.Supplier || 'Unknown supplier',
       image: productItem.Products.Image || '/placeholder.svg',
+      expiryDate: productItem.Products.ExpiryDate ? new Date(productItem.Products.ExpiryDate).toISOString() : null,
+      isActive: productItem.Products.IsActive,
       lastRestocked: productItem.Products.UpdatedAt 
         ? new Date(productItem.Products.UpdatedAt).toLocaleDateString('en-US', {
             month: 'short',
@@ -66,11 +69,11 @@ export async function GET(
       product: formattedProduct
     });
   } catch (error: any) {
-    console.error('Error fetching product:', error);
+    console.error('Error retrieving product:', error);
     
     return NextResponse.json({
       status: 'error',
-      message: `Error fetching product: ${error.message || 'Unknown error'}`
+      message: `Error retrieving product: ${error.message || 'Unknown error'}`
     }, { status: 500 });
   }
 }
@@ -94,6 +97,22 @@ export async function PATCH(
     
     const body = await request.json();
     
+    // Parse expiry date if provided
+    let expiryDate = undefined;
+    if (body.expiryDate !== undefined) {
+      if (body.expiryDate === null) {
+        expiryDate = null;
+      } else {
+        expiryDate = new Date(body.expiryDate);
+        if (isNaN(expiryDate.getTime())) {
+          return NextResponse.json({
+            status: 'error',
+            message: 'Invalid expiry date format'
+          }, { status: 400 });
+        }
+      }
+    }
+    
     // Update the product
     const updatedProduct = await db
       .update(Products)
@@ -104,6 +123,8 @@ export async function PATCH(
         Description: body.description || undefined,
         Image: body.image || undefined,
         Supplier: body.supplier || undefined,
+        ExpiryDate: expiryDate,
+        IsActive: body.isActive !== undefined ? body.isActive : undefined,
         UpdatedAt: new Date()
       })
       .where(eq(Products.ProductId, productId))
@@ -134,6 +155,8 @@ export async function PATCH(
       description: updatedProduct[0].Description || '',
       supplier: updatedProduct[0].Supplier || 'Unknown supplier',
       image: updatedProduct[0].Image || '/placeholder.svg',
+      expiryDate: updatedProduct[0].ExpiryDate ? new Date(updatedProduct[0].ExpiryDate).toISOString() : null,
+      isActive: updatedProduct[0].IsActive,
       lastRestocked: updatedProduct[0].UpdatedAt 
         ? new Date(updatedProduct[0].UpdatedAt).toLocaleDateString('en-US', {
             month: 'short',
@@ -163,7 +186,7 @@ export async function PATCH(
 }
 
 /**
- * DELETE handler for deleting a specific product by ID
+ * DELETE handler for archiving a product (not actually deleting)
  */
 export async function DELETE(
   request: Request,
@@ -179,13 +202,10 @@ export async function DELETE(
       }, { status: 400 });
     }
     
-    // Delete the product
-    const deletedProduct = await db
-      .delete(Products)
-      .where(eq(Products.ProductId, productId))
-      .returning();
+    // Archive the product instead of deleting it
+    const archivedProduct = await ProductRepository.Archive(productId);
     
-    if (deletedProduct.length === 0) {
+    if (!archivedProduct) {
       return NextResponse.json({
         status: 'error',
         message: 'Product not found'
@@ -194,14 +214,18 @@ export async function DELETE(
     
     return NextResponse.json({
       status: 'success',
-      message: 'Product deleted successfully'
+      message: 'Product archived successfully',
+      product: {
+        id: archivedProduct.ProductId,
+        isActive: archivedProduct.IsActive
+      }
     });
   } catch (error: any) {
-    console.error('Error deleting product:', error);
+    console.error('Error archiving product:', error);
     
     return NextResponse.json({
       status: 'error',
-      message: `Error deleting product: ${error.message || 'Unknown error'}`
+      message: `Error archiving product: ${error.message || 'Unknown error'}`
     }, { status: 500 });
   }
 }
@@ -258,6 +282,18 @@ export async function PUT(
       categoryId = newCategory[0].CategoryId;
     }
     
+    // Parse expiry date if provided
+    let expiryDate = null;
+    if (body.expiryDate) {
+      expiryDate = new Date(body.expiryDate);
+      if (isNaN(expiryDate.getTime())) {
+        return NextResponse.json({
+          status: 'error',
+          message: 'Invalid expiry date format'
+        }, { status: 400 });
+      }
+    }
+    
     // Update the product with all new values
     const updatedProduct = await db
       .update(Products)
@@ -270,6 +306,8 @@ export async function PUT(
         CategoryId: categoryId,
         Image: body.image || null,
         Supplier: body.supplier || null,
+        ExpiryDate: expiryDate,
+        IsActive: body.isActive !== undefined ? body.isActive : true,
         UpdatedAt: new Date()
       })
       .where(eq(Products.ProductId, productId))
@@ -293,6 +331,8 @@ export async function PUT(
       description: updatedProduct[0].Description || '',
       supplier: updatedProduct[0].Supplier || 'Unknown supplier',
       image: updatedProduct[0].Image || '/placeholder.svg',
+      expiryDate: updatedProduct[0].ExpiryDate ? new Date(updatedProduct[0].ExpiryDate).toISOString() : null,
+      isActive: updatedProduct[0].IsActive,
       lastRestocked: updatedProduct[0].UpdatedAt 
         ? new Date(updatedProduct[0].UpdatedAt).toLocaleDateString('en-US', {
             month: 'short',

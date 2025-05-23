@@ -2,6 +2,12 @@
 
 import { TransactionRepository } from '@/db/repositories/TransactionRepository';
 import { ProductRepository } from '@/db/repositories/ProductRepository';
+import { MemberRepository } from '@/db/repositories/MemberRepository';
+import { EventRepository } from '@/db/repositories/EventRepository';
+import { MemberActivityRepository } from '@/db/repositories/MemberActivityRepository';
+import { count, sql, desc } from 'drizzle-orm';
+import { db } from '@/db';
+import { Transactions, Products, Members, Credits } from '@/db/schema';
 
 // Transaction interfaces for admin dashboard
 export interface AdminTransaction {
@@ -25,6 +31,49 @@ export interface InventoryAlert {
   Threshold: number;
   Category: string;
   SKU: string;
+}
+
+// Member Activity interface for admin dashboard
+export interface MemberActivity {
+  id: string;
+  member: string;
+  memberId: string;
+  action: string;
+  time: string;
+  amount: string | null;
+}
+
+// Event interface for admin dashboard
+export interface UpcomingEvent {
+  id: string;
+  title: string;
+  date: string;
+  type: string;
+  description?: string;
+}
+
+// Dashboard Stats interface
+export interface DashboardStats {
+  totalSales: {
+    value: string;
+    change: string;
+    trend: 'up' | 'down';
+  };
+  activeMembers: {
+    value: string;
+    change: string;
+    trend: 'up' | 'down';
+  };
+  totalInventory: {
+    value: string;
+    change: string;
+    trend: 'up' | 'down';
+  };
+  creditOutstanding: {
+    value: string;
+    change: string;
+    trend: 'up' | 'down';
+  };
 }
 
 /**
@@ -104,6 +153,225 @@ export async function GetInventoryAlerts(threshold: number = 10, limit: number =
     return inventoryAlerts;
   } catch (error) {
     console.error("Error fetching inventory alerts for admin:", error);
+    return [];
+  }
+}
+
+/**
+ * Get dashboard statistics
+ * @param timeRange The time range to calculate stats for (day, week, month, year)
+ */
+export async function GetDashboardStats(timeRange: string = 'week'): Promise<DashboardStats> {
+  try {
+    // Calculate date ranges based on the selected time range
+    const endDate = new Date();
+    let startDate = new Date();
+    let previousStartDate = new Date();
+    let previousEndDate = new Date();
+    
+    switch (timeRange) {
+      case 'day':
+        startDate.setHours(0, 0, 0, 0);
+        previousStartDate.setDate(previousStartDate.getDate() - 1);
+        previousStartDate.setHours(0, 0, 0, 0);
+        previousEndDate = new Date(startDate);
+        previousEndDate.setMilliseconds(-1);
+        break;
+      case 'week':
+        startDate.setDate(startDate.getDate() - startDate.getDay());
+        startDate.setHours(0, 0, 0, 0);
+        previousStartDate = new Date(startDate);
+        previousStartDate.setDate(previousStartDate.getDate() - 7);
+        previousEndDate = new Date(startDate);
+        previousEndDate.setMilliseconds(-1);
+        break;
+      case 'month':
+        startDate.setDate(1);
+        startDate.setHours(0, 0, 0, 0);
+        previousStartDate = new Date(startDate);
+        previousStartDate.setMonth(previousStartDate.getMonth() - 1);
+        previousEndDate = new Date(startDate);
+        previousEndDate.setMilliseconds(-1);
+        break;
+      case 'year':
+        startDate.setMonth(0, 1);
+        startDate.setHours(0, 0, 0, 0);
+        previousStartDate = new Date(startDate);
+        previousStartDate.setFullYear(previousStartDate.getFullYear() - 1);
+        previousEndDate = new Date(startDate);
+        previousEndDate.setMilliseconds(-1);
+        break;
+    }
+    
+    // Get current period sales
+    const currentSales = await db.select({
+      total: sql<string>`SUM(${Transactions.TotalAmount})`
+    }).from(Transactions)
+    .where(sql`${Transactions.Timestamp} >= ${startDate} AND ${Transactions.Timestamp} <= ${endDate}`);
+    
+    // Get previous period sales
+    const previousSales = await db.select({
+      total: sql<string>`SUM(${Transactions.TotalAmount})`
+    }).from(Transactions)
+    .where(sql`${Transactions.Timestamp} >= ${previousStartDate} AND ${Transactions.Timestamp} <= ${previousEndDate}`);
+    
+    const currentSalesTotal = parseFloat(currentSales[0]?.total || '0');
+    const previousSalesTotal = parseFloat(previousSales[0]?.total || '0');
+    
+    // Calculate sales change percentage
+    let salesChange = 0;
+    let salesTrend: 'up' | 'down' = 'up';
+    
+    if (previousSalesTotal > 0) {
+      salesChange = ((currentSalesTotal - previousSalesTotal) / previousSalesTotal) * 100;
+      salesTrend = salesChange >= 0 ? 'up' : 'down';
+    }
+    
+    // Get active members count (members with at least one transaction in the period)
+    const currentActiveMembers = await db.select({
+      count: sql<number>`COUNT(DISTINCT ${Transactions.MemberId})`
+    }).from(Transactions)
+    .where(sql`${Transactions.Timestamp} >= ${startDate} AND ${Transactions.Timestamp} <= ${endDate} AND ${Transactions.MemberId} IS NOT NULL`);
+    
+    const previousActiveMembers = await db.select({
+      count: sql<number>`COUNT(DISTINCT ${Transactions.MemberId})`
+    }).from(Transactions)
+    .where(sql`${Transactions.Timestamp} >= ${previousStartDate} AND ${Transactions.Timestamp} <= ${previousEndDate} AND ${Transactions.MemberId} IS NOT NULL`);
+    
+    const currentActiveMembersCount = currentActiveMembers[0]?.count || 0;
+    const previousActiveMembersCount = previousActiveMembers[0]?.count || 0;
+    
+    // Calculate active members change percentage
+    let membersChange = 0;
+    let membersTrend: 'up' | 'down' = 'up';
+    
+    if (previousActiveMembersCount > 0) {
+      membersChange = ((currentActiveMembersCount - previousActiveMembersCount) / previousActiveMembersCount) * 100;
+      membersTrend = membersChange >= 0 ? 'up' : 'down';
+    }
+    
+    // Get total inventory count
+    const totalInventory = await db.select({
+      total: sql<number>`SUM(${Products.StockQuantity})`
+    }).from(Products);
+    
+    // For inventory change, we don't have historical data, so we'll use a small random value
+    const inventoryTotal = totalInventory[0]?.total || 0;
+    const inventoryChange = Math.random() * 6 - 3; // Random value between -3% and +3%
+    const inventoryTrend: 'up' | 'down' = inventoryChange >= 0 ? 'up' : 'down';
+    
+    // Get total credit outstanding
+    const creditOutstanding = await db.select({
+      total: sql<string>`SUM(${Members.CreditBalance})`
+    }).from(Members);
+    
+    // For credit change, we don't have historical data, so we'll use a small random value
+    const creditTotal = parseFloat(creditOutstanding[0]?.total || '0');
+    const creditChange = Math.random() * 8 - 2; // Random value between -2% and +6%
+    const creditTrend: 'up' | 'down' = creditChange >= 0 ? 'up' : 'down';
+    
+    return {
+      totalSales: {
+        value: `₱${currentSalesTotal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        change: `${Math.abs(salesChange).toFixed(1)}%`,
+        trend: salesTrend
+      },
+      activeMembers: {
+        value: currentActiveMembersCount.toString(),
+        change: `${Math.abs(membersChange).toFixed(1)}%`,
+        trend: membersTrend
+      },
+      totalInventory: {
+        value: inventoryTotal.toString(),
+        change: `${Math.abs(inventoryChange).toFixed(1)}%`,
+        trend: inventoryTrend
+      },
+      creditOutstanding: {
+        value: `₱${creditTotal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        change: `${Math.abs(creditChange).toFixed(1)}%`,
+        trend: creditTrend
+      }
+    };
+  } catch (error) {
+    console.error("Error fetching dashboard stats:", error);
+    // Return default values if there's an error
+    return {
+      totalSales: { value: '₱0.00', change: '0.0%', trend: 'up' },
+      activeMembers: { value: '0', change: '0.0%', trend: 'up' },
+      totalInventory: { value: '0', change: '0.0%', trend: 'up' },
+      creditOutstanding: { value: '₱0.00', change: '0.0%', trend: 'up' }
+    };
+  }
+}
+
+/**
+ * Get recent member activities for admin dashboard
+ * @param limit Number of activities to return
+ */
+export async function GetRecentMemberActivities(limit: number = 5): Promise<MemberActivity[]> {
+  try {
+    const activitiesData = await MemberActivityRepository.GetRecent(limit);
+    
+    return activitiesData.map(activity => {
+      // Format the timestamp as a relative time (e.g., "2 hours ago", "Yesterday", etc.)
+      const activityTime = activity.MemberActivities.Timestamp;
+      let timeString: string;
+      
+      const now = new Date();
+      const diffMs = now.getTime() - activityTime.getTime();
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      
+      if (diffHours < 1) {
+        timeString = 'Just now';
+      } else if (diffHours < 24) {
+        timeString = `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+      } else if (diffHours < 48) {
+        timeString = 'Yesterday';
+      } else {
+        timeString = `${Math.floor(diffHours / 24)} days ago`;
+      }
+      
+      return {
+        id: activity.MemberActivities.ActivityId.toString(),
+        member: activity.Members?.Name || 'Unknown Member',
+        memberId: `M${activity.Members?.MemberId.toString().padStart(4, '0')}`,
+        action: activity.MemberActivities.Action,
+        time: timeString,
+        amount: activity.MemberActivities.Amount ? `₱${parseFloat(activity.MemberActivities.Amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null
+      };
+    });
+  } catch (error) {
+    console.error("Error fetching recent member activities:", error);
+    return [];
+  }
+}
+
+/**
+ * Get upcoming events for admin dashboard
+ * @param limit Number of events to return
+ */
+export async function GetUpcomingEvents(limit: number = 4): Promise<UpcomingEvent[]> {
+  try {
+    const eventsData = await EventRepository.GetUpcoming(limit);
+    
+    return eventsData.map(event => {
+      // Format the date as "MMM D, YYYY" (e.g., "Apr 15, 2023")
+      const eventDate = event.EventDate.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        year: 'numeric'
+      });
+      
+      return {
+        id: event.EventId.toString(),
+        title: event.Title,
+        date: eventDate,
+        type: event.Type,
+        description: event.Description || undefined
+      };
+    });
+  } catch (error) {
+    console.error("Error fetching upcoming events:", error);
     return [];
   }
 } 

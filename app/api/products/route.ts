@@ -2,67 +2,79 @@ import { NextResponse } from 'next/server';
 import { ProductRepository } from '@/db/repositories';
 import { db } from '@/db/connection';
 import { Products, Categories } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, lte, and } from 'drizzle-orm';
 
 /**
  * GET handler for retrieving all products
  */
 export async function GET(request: Request) {
   try {
-    // Check if we should return only low stock products
+    // Get query parameters
     const { searchParams } = new URL(request.url);
-    const lowStock = searchParams.get('low_stock');
-    const threshold = searchParams.get('threshold');
+    const category = searchParams.get('category');
+    const lowStockOnly = searchParams.get('lowStock') === 'true';
+    const activeOnly = searchParams.get('activeOnly') === 'true';
     
-    let productsData;
+    // Start with a base query
+    let conditions = [];
     
-    if (lowStock === 'true') {
-      productsData = await ProductRepository.GetLowStock(
-        threshold ? parseInt(threshold) : 10
-      );
-    } else {
-      productsData = await ProductRepository.GetAll();
+    // Apply category filter
+    if (category && category !== 'all') {
+      conditions.push(eq(Categories.Name, category));
     }
     
-    // Format the response to match the frontend model
-    const formattedProducts = productsData.map(item => {
-      const product = item.Products || item;
-      const category = item.Categories ? item.Categories.Name : null;
-      
-      return {
-        id: product.ProductId,
-        name: product.Name,
-        price: parseFloat(product.Price),
-        category: category || 'uncategorized',
-        sku: product.Sku,
-        stock: product.StockQuantity,
-        description: product.Description || '',
-        supplier: product.Supplier || 'Unknown supplier',
-        image: product.Image || '/placeholder.svg',
-        lastRestocked: product.UpdatedAt 
-          ? new Date(product.UpdatedAt).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric'
-            })
-          : new Date().toLocaleDateString('en-US', {
-              month: 'short', 
-              day: 'numeric',
-              year: 'numeric'
-            })
-      };
-    });
+    // Apply low stock filter if requested
+    if (lowStockOnly) {
+      conditions.push(lte(Products.StockQuantity, 10));
+    }
     
-    return NextResponse.json({
-      status: 'success',
-      products: formattedProducts
-    });
+    // Apply active filter if requested
+    if (activeOnly) {
+      conditions.push(eq(Products.IsActive, true));
+    }
+    
+    // Execute the query with all conditions, selecting only required fields
+    const rawProducts = await db.select({
+      id: Products.ProductId,
+      name: Products.Name,
+      price: Products.Price,
+      category: Categories.Name,
+      image: Products.Image,
+      sku: Products.Sku,
+      stock: Products.StockQuantity,
+      description: Products.Description,
+      supplier: Products.Supplier,
+      lastRestocked: Products.UpdatedAt,
+      expiryDate: Products.ExpiryDate,
+    })
+      .from(Products)
+      .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
+      .where(conditions.length ? and(...conditions) : undefined);
+    
+    // Format the products to match frontend expectations
+    const products = rawProducts.map((product) => ({
+      id: product.id,
+      name: product.name,
+      price: parseFloat(String(product.price)),
+      category: product.category || '',
+      image: product.image || '',
+      sku: product.sku,
+      stock: product.stock,
+      description: product.description || '',
+      supplier: product.supplier || '',
+      expiryDate: product.expiryDate || '',
+      lastRestocked: product.lastRestocked instanceof Date
+        ? product.lastRestocked.toISOString()
+        : String(product.lastRestocked || ''),
+    }));
+
+    return NextResponse.json({ status: 'success', products });
   } catch (error: any) {
-    console.error('Error fetching products:', error);
+    console.error('Error retrieving products:', error);
     
     return NextResponse.json({
       status: 'error',
-      message: `Error fetching products: ${error.message || 'Unknown error'}`
+      message: `Error retrieving products: ${error.message || 'Unknown error'}`
     }, { status: 500 });
   }
 }
@@ -107,6 +119,15 @@ export async function POST(request: Request) {
       categoryId = newCategory[0].CategoryId;
     }
 
+    // Parse expiry date
+    let expiryDate = null;
+    if (body.expiryDate) {
+      expiryDate = new Date(body.expiryDate);
+      if (isNaN(expiryDate.getTime())) {
+        expiryDate = null;
+      }
+    }
+
     // Insert the product - only using fields that exist in the schema
     const newProduct = await db
       .insert(Products)
@@ -119,36 +140,32 @@ export async function POST(request: Request) {
         CategoryId: categoryId,
         Image: body.image || null, // Store the image data
         Supplier: body.supplier || null, // Store the supplier
+        ExpiryDate: expiryDate,
+        IsActive: true
       })
       .returning();
 
-    // Format the response to match the frontend model
-    const formattedProduct = {
-      id: newProduct[0].ProductId,
-      name: newProduct[0].Name,
-      price: parseFloat(newProduct[0].Price),
-      category: body.category,
-      sku: newProduct[0].Sku,
-      stock: newProduct[0].StockQuantity,
-      description: newProduct[0].Description || '',
-      supplier: newProduct[0].Supplier || 'Unknown supplier',
-      image: newProduct[0].Image || '/placeholder.svg',
-      lastRestocked: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      })
-    };
-
+    // Format the product for response
     return NextResponse.json({
       status: 'success',
       message: 'Product created successfully',
-      product: formattedProduct
+      product: {
+        id: newProduct[0].ProductId,
+        name: newProduct[0].Name,
+        price: parseFloat(newProduct[0].Price),
+        category: body.category,
+        sku: newProduct[0].Sku,
+        stock: newProduct[0].StockQuantity,
+        description: newProduct[0].Description || '',
+        supplier: newProduct[0].Supplier || '',
+        image: newProduct[0].Image || '',
+        expiryDate: newProduct[0].ExpiryDate ? new Date(newProduct[0].ExpiryDate).toISOString() : null,
+        isActive: newProduct[0].IsActive
+      }
     });
   } catch (error: any) {
     console.error('Error creating product:', error);
     
-    // Handle duplicate SKU
     if (error.message.includes('duplicate key value violates unique constraint')) {
       return NextResponse.json({
         status: 'error',

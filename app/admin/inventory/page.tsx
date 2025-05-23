@@ -40,6 +40,15 @@ interface Product {
   description: string
   supplier: string
   lastRestocked: string
+  expiryDate?: string | null
+  isActive?: boolean
+}
+
+// Inserted API response type for product listing
+interface ProductsApiResponse {
+  status: 'success' | 'error'
+  products: Product[]
+  message?: string
 }
 
 export default function AdminInventoryPage() {
@@ -68,7 +77,9 @@ export default function AdminInventoryPage() {
     stock: "",
     description: "",
     supplier: "",
-    image: "/placeholder.svg"
+    image: "/placeholder.svg",
+    expiryDate: "",
+    isActive: true
   })
   
   // Form states for Edit Product
@@ -80,8 +91,37 @@ export default function AdminInventoryPage() {
     stock: "",
     description: "",
     supplier: "",
-    image: ""
+    image: "",
+    expiryDate: "",
+    isActive: true
   })
+  
+  // Add function to check for products near expiration
+  const checkForNearExpiryProducts = (productsList: Product[]) => {
+    const nearExpiryProducts = productsList.filter(product => 
+      product.expiryDate && isExpiringSoon(product.expiryDate) && !isExpired(product.expiryDate)
+    );
+    
+    if (nearExpiryProducts.length > 0) {
+      toast({
+        title: "Products Expiring Soon",
+        description: `${nearExpiryProducts.length} product(s) will expire soon. Check inventory for details.`,
+        variant: "destructive",
+      });
+    }
+    
+    const expiredProducts = productsList.filter(product => 
+      product.expiryDate && isExpired(product.expiryDate)
+    );
+    
+    if (expiredProducts.length > 0) {
+      toast({
+        title: "Expired Products",
+        description: `${expiredProducts.length} product(s) have expired. Please remove from inventory.`,
+        variant: "destructive",
+      });
+    }
+  };
   
   // Load products on component mount
   useEffect(() => {
@@ -89,7 +129,7 @@ export default function AdminInventoryPage() {
       setIsLoading(true)
       try {
         const response = await fetch('/api/products')
-        const data = await response.json()
+        const data = (await response.json()) as ProductsApiResponse
         
         if (data.status === 'success') {
           setProducts(data.products)
@@ -101,6 +141,9 @@ export default function AdminInventoryPage() {
           // Count low stock items
           const lowStock = data.products.filter((product: Product) => product.stock < 10).length
           setLowStockCount(lowStock)
+          
+          // Check for products near expiration
+          checkForNearExpiryProducts(data.products)
         } else {
           setError(data.message || 'Failed to fetch products')
         }
@@ -154,9 +197,18 @@ export default function AdminInventoryPage() {
       stock: product.stock.toString(),
       description: product.description || "",
       supplier: product.supplier || "",
-      image: product.image || "/placeholder.svg"
+      image: product.image || "/placeholder.svg",
+      expiryDate: product.expiryDate || "",
+      isActive: product.isActive !== undefined ? product.isActive : true
     })
     setIsEditProductModalOpen(true)
+  }
+
+  // Handle view product
+  const handleViewProduct = (product: Product) => {
+    setSelectedProduct(product)
+    setIsEditProductModalOpen(false)
+    setIsDeleteConfirmOpen(false)
   }
 
   // Handle delete product
@@ -171,8 +223,8 @@ export default function AdminInventoryPage() {
       // Validate form
       if (!newProduct.name || !newProduct.price || !newProduct.category || !newProduct.sku) {
         toast({
-          title: "Missing required fields",
-          description: "Please fill in all required fields",
+          title: "Missing Required Fields",
+          description: "Please fill in all required fields: name, price, category, and SKU.",
           variant: "destructive"
         })
         return
@@ -189,7 +241,9 @@ export default function AdminInventoryPage() {
           stock: parseInt(newProduct.stock) || 0,
           description: newProduct.description,
           supplier: newProduct.supplier,
-          image: newProduct.image
+          image: newProduct.image,
+          expiryDate: newProduct.expiryDate || null,
+          isActive: newProduct.isActive
         })
       })
       
@@ -197,7 +251,8 @@ export default function AdminInventoryPage() {
       
       if (data.status === 'success') {
         // Add the new product to the state
-        setProducts([...products, data.product])
+        const updatedProducts = [...products, data.product];
+        setProducts(updatedProducts)
         
         // Reset form and close modal
         setNewProduct({
@@ -208,31 +263,37 @@ export default function AdminInventoryPage() {
           stock: "",
           description: "",
           supplier: "",
-          image: "/placeholder.svg"
+          image: "/placeholder.svg",
+          expiryDate: "",
+          isActive: true
         })
         setIsAddProductModalOpen(false)
         
-        // Show success toast
+        // Show enhanced success toast
         toast({
-          title: "Product added",
-          description: "The product has been successfully added",
+          title: "Product Added Successfully",
+          description: `${data.product.name} has been added to inventory with ${data.product.stock} units.`,
+          variant: "default"
         })
         
         // Check if we need to add a new category
         if (!categories.includes(data.product.category)) {
           setCategories([...categories, data.product.category])
         }
+        
+        // Check for products near expiration
+        checkForNearExpiryProducts(updatedProducts)
       } else {
         toast({
-          title: "Error adding product",
-          description: data.message || "Failed to add product",
+          title: "Failed to Add Product",
+          description: data.message || "An error occurred while adding the product. Please try again.",
           variant: "destructive"
         })
       }
     } catch (err) {
       console.error('Error adding product:', err)
       toast({
-        title: "Error",
+        title: "Failed to Add Product",
         description: "An unexpected error occurred. Please try again.",
         variant: "destructive"
       })
@@ -247,8 +308,8 @@ export default function AdminInventoryPage() {
       // Validate form
       if (!editedProduct.name || !editedProduct.price || !editedProduct.category) {
         toast({
-          title: "Missing required fields",
-          description: "Please fill in all required fields",
+          title: "Missing Required Fields",
+          description: "Please fill in all required fields: name, price, and category.",
           variant: "destructive"
         })
         return
@@ -265,7 +326,9 @@ export default function AdminInventoryPage() {
           stock: parseInt(editedProduct.stock) || 0,
           description: editedProduct.description,
           supplier: editedProduct.supplier,
-          image: editedProduct.image
+          image: editedProduct.image,
+          expiryDate: editedProduct.expiryDate || null,
+          isActive: editedProduct.isActive
         })
       })
       
@@ -273,32 +336,37 @@ export default function AdminInventoryPage() {
       
       if (data.status === 'success') {
         // Update product in the state
-        setProducts(products.map(p => p.id === selectedProduct.id ? data.product : p))
+        const updatedProducts = products.map(p => p.id === selectedProduct.id ? data.product : p);
+        setProducts(updatedProducts)
         
         // Close modal
         setIsEditProductModalOpen(false)
         
-        // Show success toast
+        // Show enhanced success toast
         toast({
-          title: "Product updated",
-          description: "The product has been successfully updated",
+          title: "Product Updated Successfully",
+          description: `${data.product.name} has been updated with the latest information.`,
+          variant: "default"
         })
         
         // Check if we need to add a new category
         if (!categories.includes(data.product.category)) {
           setCategories([...categories, data.product.category])
         }
+        
+        // Check for products near expiration
+        checkForNearExpiryProducts(updatedProducts)
       } else {
         toast({
-          title: "Error updating product",
-          description: data.message || "Failed to update product",
+          title: "Failed to Update Product",
+          description: data.message || "An error occurred while updating the product. Please try again.",
           variant: "destructive"
         })
       }
     } catch (err) {
       console.error('Error updating product:', err)
       toast({
-        title: "Error",
+        title: "Failed to Update Product",
         description: "An unexpected error occurred. Please try again.",
         variant: "destructive"
       })
@@ -318,30 +386,32 @@ export default function AdminInventoryPage() {
       
       if (data.status === 'success') {
         // Remove product from the state
-        setProducts(products.filter(p => p.id !== selectedProduct.id))
+        const updatedProducts = products.filter(p => p.id !== selectedProduct.id);
+        setProducts(updatedProducts)
         
         // Close modal
         setIsDeleteConfirmOpen(false)
         
-        // Show success toast
+        // Show enhanced success toast
         toast({
-          title: "Product deleted",
-          description: "The product has been successfully deleted",
+          title: "Product Archived Successfully",
+          description: `${selectedProduct.name} has been archived and will no longer appear in the POS system.`,
+          variant: "default"
         })
         
         // Update low stock count
-        setLowStockCount(products.filter(p => p.id !== selectedProduct.id && p.stock < 10).length)
+        setLowStockCount(updatedProducts.filter(p => p.stock < 10).length)
       } else {
         toast({
-          title: "Error deleting product",
-          description: data.message || "Failed to delete product",
+          title: "Failed to Archive Product",
+          description: data.message || "An error occurred while archiving the product. Please try again.",
           variant: "destructive"
         })
       }
     } catch (err) {
       console.error('Error deleting product:', err)
       toast({
-        title: "Error",
+        title: "Failed to Archive Product",
         description: "An unexpected error occurred. Please try again.",
         variant: "destructive"
       })
@@ -359,10 +429,98 @@ export default function AdminInventoryPage() {
       stock: product.stock.toString(),
       description: product.description || "",
       supplier: product.supplier || "",
-      image: product.image || "/placeholder.svg"
+      image: product.image || "/placeholder.svg",
+      expiryDate: product.expiryDate || "",
+      isActive: product.isActive !== undefined ? product.isActive : true
     })
     setIsEditProductModalOpen(true)
   }
+
+  // Enhanced helper function for date formatting
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString) return null;
+    
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return null;
+      
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return null;
+    }
+  };
+
+  const isExpired = (dateString: string | null | undefined) => {
+    if (!dateString) return false;
+    const date = new Date(dateString);
+    return !isNaN(date.getTime()) && date < new Date();
+  };
+
+  const isExpiringSoon = (dateString: string | null | undefined) => {
+    if (!dateString) return false;
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return false;
+    
+    const today = new Date();
+    const sevenDaysFromNow = new Date();
+    sevenDaysFromNow.setDate(today.getDate() + 7);
+    
+    return date > today && date <= sevenDaysFromNow;
+  };
+
+  // Enhanced helper functions for stock status
+  const getStockStatus = (stock: number) => {
+    if (stock <= 5) return { color: 'text-red-600', badge: 'Critical', bgColor: 'bg-red-100', indicator: 'bg-red-500' };
+    if (stock < 10) return { color: 'text-red-600', badge: 'Low', bgColor: 'bg-red-100', indicator: 'bg-red-500' };
+    if (stock < 30) return { color: 'text-amber-600', badge: 'Medium', bgColor: 'bg-amber-100', indicator: 'bg-amber-500' };
+    return { color: 'text-green-600', badge: null, bgColor: 'bg-green-100', indicator: 'bg-green-500' };
+  };
+
+  // Add this function to handle activating archived products
+  const handleActivateProduct = async (product: Product) => {
+    try {
+      const response = await fetch(`/api/products/${product.id}/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        // Update product in the state
+        const updatedProducts = products.map(p => p.id === product.id ? { ...p, isActive: true } : p);
+        setProducts(updatedProducts);
+        
+        // Show enhanced success toast
+        toast({
+          title: "Product Activated Successfully",
+          description: `${product.name} has been restored to active status and will now appear in the POS system.`,
+          variant: "default"
+        });
+        
+        // Check for products near expiration
+        checkForNearExpiryProducts(updatedProducts);
+      } else {
+        toast({
+          title: "Failed to Activate Product",
+          description: data.message || "An error occurred while activating the product. Please try again.",
+          variant: "destructive"
+        });
+      }
+    } catch (err) {
+      console.error('Error activating product:', err);
+      toast({
+        title: "Failed to Activate Product",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -476,15 +634,35 @@ export default function AdminInventoryPage() {
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-3 px-4 font-medium text-gray-600">Product</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-600">Category</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-600">Price</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-600">Stock</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-600">Barcode</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-600">Last Restocked</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-600">Actions</th>
+                    <thead className="bg-gray-100 text-gray-600 text-sm">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Product</th>
+                        <th className="px-4 py-3 text-left hidden md:table-cell">
+                          <div className="flex items-center">
+                            Category
+                            <Button variant="ghost" size="sm" className="ml-1 h-6 w-6 p-0" onClick={() => setSortBy("category")}>
+                              <ArrowUpDown className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </th>
+                        <th className="px-4 py-3 text-left">
+                          <div className="flex items-center">
+                            Price
+                            <Button variant="ghost" size="sm" className="ml-1 h-6 w-6 p-0" onClick={() => setSortBy("price")}>
+                              <ArrowUpDown className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </th>
+                        <th className="px-4 py-3 text-left">
+                          <div className="flex items-center">
+                            Stock
+                            <Button variant="ghost" size="sm" className="ml-1 h-6 w-6 p-0" onClick={() => setSortBy("stock")}>
+                              <ArrowUpDown className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </th>
+                        <th className="px-4 py-3 text-left hidden md:table-cell">Status</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -495,61 +673,87 @@ export default function AdminInventoryPage() {
                           animate={{ opacity: 1 }}
                           className="border-b hover:bg-gray-50"
                         >
-                          <td className="py-3 px-4">
+                          <td className="px-4 py-3">
                             <div className="flex items-center gap-3">
-                              <div className="relative h-10 w-10 rounded-md overflow-hidden bg-gray-100">
-                                <Image
-                                  src={product.image || "/placeholder.svg"}
+                              <div className="h-10 w-10 rounded-md border bg-gray-100 relative overflow-hidden">
+                                <Image 
+                                  src={product.image || "/placeholder.svg"} 
                                   alt={product.name}
                                   fill
                                   className="object-cover"
+                                  unoptimized
                                 />
                               </div>
-                              <span className="font-medium">{product.name}</span>
+                              <div>
+                                <p className="font-medium text-gray-900">{product.name}</p>
+                                <p className="text-xs text-gray-500">SKU: {product.sku}</p>
+                              </div>
                             </div>
                           </td>
-                          <td className="py-3 px-4">
-                            <Badge className="capitalize">{product.category}</Badge>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <Badge variant="outline" className="bg-gray-50">
+                              {product.category}
+                            </Badge>
                           </td>
-                          <td className="py-3 px-4 font-medium">₱{product.price.toFixed(2)}</td>
-                          <td className="py-3 px-4">
-                            <span
-                              className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                                product.stock < 10
-                                  ? "bg-red-100 text-red-800"
-                                  : product.stock < 30
-                                    ? "bg-amber-100 text-amber-800"
-                                    : "bg-green-100 text-green-800"
-                              }`}
-                            >
-                              {product.stock}
-                            </span>
+                          <td className="px-4 py-3">₱{product.price.toFixed(2)}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-block h-2 w-2 rounded-full ${getStockStatus(product.stock).indicator}`} />
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={getStockStatus(product.stock).color}>{product.stock}</span>
+                                  {getStockStatus(product.stock).badge && (
+                                    <Badge variant="outline" className={`${getStockStatus(product.stock).bgColor} ${getStockStatus(product.stock).color} border-0 text-xs py-0 px-1.5`}>
+                                      {getStockStatus(product.stock).badge}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           </td>
-                          <td className="py-3 px-4 text-gray-600">{product.sku}</td>
-                          <td className="py-3 px-4 text-gray-600">{product.lastRestocked}</td>
-                          <td className="py-3 px-4">
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <div className="flex">
+                              {product.isActive === false && (
+                                <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200">
+                                  Archived
+                                </Badge>
+                              )}
+                              {product.expiryDate && (
+                                <Badge variant="outline" className={`${isExpired(product.expiryDate) ? 'bg-red-50 text-red-600 border-red-200' : 'bg-amber-50 text-amber-600 border-amber-200'} mt-1`}>
+                                  {isExpired(product.expiryDate) ? 'Expired' : `Expires: ${formatDate(product.expiryDate)}`}
+                                </Badge>
+                              )}
+                              {(!product.expiryDate && product.isActive !== false) && (
+                                <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200">
+                                  Active
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right">
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <Button variant="ghost" size="sm">
                                   <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
                                 <DropdownMenuItem onClick={() => handleEditProduct(product)}>
-                                  <Edit className="h-4 w-4 mr-2" />
-                                  Edit Product
+                                  <Edit className="h-4 w-4 mr-2" /> Edit Product
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleUpdateStock(product)}>
-                                  <Package className="h-4 w-4 mr-2" />
                                   Update Stock
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem className="text-red-600" onClick={() => handleDeleteProduct(product)}>
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Delete Product
+                                <DropdownMenuItem onClick={() => handleDeleteProduct(product)} className="text-red-600">
+                                  <Trash2 className="h-4 w-4 mr-2" /> {product.isActive === false ? "Delete Permanently" : "Archive Product"}
                                 </DropdownMenuItem>
+                                {product.isActive === false && (
+                                  <DropdownMenuItem onClick={() => handleActivateProduct(product)} className="text-green-600">
+                                    Restore Product
+                                  </DropdownMenuItem>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </td>
@@ -565,8 +769,8 @@ export default function AdminInventoryPage() {
       </main>
 
       {/* Add Product Modal */}
-      <Dialog open={isAddProductModalOpen} onOpenChange={setIsAddProductModalOpen}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog open={isAddProductModalOpen} onOpenChange={setIsAddProductModalOpen} >
+        <DialogContent className="max-h-screen sm:max-w-md ">
           <DialogHeader>
             <DialogTitle>Add New Product</DialogTitle>
             <DialogDescription>Enter the details of the new product</DialogDescription>
@@ -661,6 +865,17 @@ export default function AdminInventoryPage() {
             </div>
 
             <div className="grid gap-2">
+              <label className="text-sm font-medium">Expiry Date</label>
+              <Input 
+                type="date" 
+                placeholder="Select expiry date (if applicable)" 
+                value={newProduct.expiryDate}
+                onChange={(e) => setNewProduct({...newProduct, expiryDate: e.target.value})}
+              />
+              <p className="text-xs text-gray-500">Leave blank if product doesn't expire</p>
+            </div>
+
+            <div className="grid gap-2">
               <label className="text-sm font-medium">Description</label>
               <textarea
                 className="min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -687,7 +902,7 @@ export default function AdminInventoryPage() {
 
       {/* Edit Product Modal */}
       <Dialog open={isEditProductModalOpen} onOpenChange={setIsEditProductModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-screen sm:max-w-md overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Product</DialogTitle>
             <DialogDescription>Update product information</DialogDescription>
@@ -777,6 +992,33 @@ export default function AdminInventoryPage() {
               </div>
 
               <div className="grid gap-2">
+                <label className="text-sm font-medium">Expiry Date</label>
+                <Input 
+                  type="date" 
+                  placeholder="Select expiry date (if applicable)" 
+                  value={editedProduct.expiryDate ? editedProduct.expiryDate.substring(0, 10) : ""}
+                  onChange={(e) => setEditedProduct({...editedProduct, expiryDate: e.target.value})}
+                />
+                <p className="text-xs text-gray-500">Leave blank if product doesn't expire</p>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Product Status</label>
+                <Select 
+                  value={editedProduct.isActive ? "active" : "archived"} 
+                  onValueChange={(value) => setEditedProduct({...editedProduct, isActive: value === "active"})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="archived">Archived</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
                 <label className="text-sm font-medium">Description</label>
                 <textarea
                   className="min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -843,6 +1085,113 @@ export default function AdminInventoryPage() {
               Delete Product
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Product Modal */}
+      <Dialog open={!!selectedProduct && !isEditProductModalOpen && !isDeleteConfirmOpen} onOpenChange={() => setSelectedProduct(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Product Details</DialogTitle>
+          </DialogHeader>
+          
+          {selectedProduct && (
+            <div className="grid gap-4">
+              <div className="relative h-40 w-full rounded-md overflow-hidden bg-gray-100">
+                <Image 
+                  src={selectedProduct.image || "/placeholder.svg"} 
+                  alt={selectedProduct.name}
+                  fill
+                  className="object-cover"
+                  unoptimized
+                />
+              </div>
+              
+              <div>
+                <h3 className="text-xl font-semibold">{selectedProduct.name}</h3>
+                <p className="text-sm text-gray-500">SKU: {selectedProduct.sku}</p>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Price</p>
+                  <p className="text-lg font-semibold">₱{selectedProduct.price.toFixed(2)}</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Stock</p>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-block h-2 w-2 rounded-full ${getStockStatus(selectedProduct.stock).indicator}`} />
+                    <span className={`text-lg font-semibold ${getStockStatus(selectedProduct.stock).color}`}>
+                      {selectedProduct.stock}
+                    </span>
+                    {getStockStatus(selectedProduct.stock).badge && (
+                      <Badge variant="outline" className={`${getStockStatus(selectedProduct.stock).bgColor} ${getStockStatus(selectedProduct.stock).color} border-0`}>
+                        {getStockStatus(selectedProduct.stock).badge}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Category</p>
+                  <p>{selectedProduct.category}</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Supplier</p>
+                  <p>{selectedProduct.supplier || "Not specified"}</p>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Last Restocked</p>
+                  <p>{formatDate(selectedProduct.lastRestocked) || "Not available"}</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Expiry Date</p>
+                  <p>{selectedProduct.expiryDate ? formatDate(selectedProduct.expiryDate) : "No expiry date"}</p>
+                  {selectedProduct.expiryDate && isExpired(selectedProduct.expiryDate) && (
+                    <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 mt-1">
+                      Expired
+                    </Badge>
+                  )}
+                  {selectedProduct.expiryDate && isExpiringSoon(selectedProduct.expiryDate) && !isExpired(selectedProduct.expiryDate) && (
+                    <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-200 mt-1">
+                      Expires Soon
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              
+              <div>
+                <p className="text-sm font-medium text-gray-500">Status</p>
+                {selectedProduct.isActive === false ? (
+                  <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200">
+                    Archived
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200">
+                    Active
+                  </Badge>
+                )}
+              </div>
+              
+              <div>
+                <p className="text-sm font-medium text-gray-500">Description</p>
+                <p className="text-gray-600">{selectedProduct.description || "No description provided."}</p>
+              </div>
+              
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setSelectedProduct(null)}>Close</Button>
+                <Button onClick={() => handleEditProduct(selectedProduct)}>Edit Product</Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

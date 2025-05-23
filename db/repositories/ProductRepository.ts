@@ -89,6 +89,9 @@ export class ProductRepository {
     Price: string;
     StockQuantity: number;
     CategoryId: number;
+    ExpiryDate?: Date;
+    Image?: string;
+    Supplier?: string;
   }) {
     try {
       const results = await db.insert(Products)
@@ -112,6 +115,10 @@ export class ProductRepository {
     Price: string;
     StockQuantity: number;
     CategoryId: number;
+    ExpiryDate: Date | null;
+    Image: string;
+    Supplier: string;
+    IsActive: boolean;
   }>) {
     try {
       const results = await db.update(Products)
@@ -122,6 +129,46 @@ export class ProductRepository {
       return results.length > 0 ? results[0] : null;
     } catch (error) {
       console.error(`Error updating product ${productId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Archive a product instead of deleting it
+   */
+  static async Archive(productId: number) {
+    try {
+      const results = await db.update(Products)
+        .set({ 
+          IsActive: false,
+          UpdatedAt: new Date()
+        })
+        .where(eq(Products.ProductId, productId))
+        .returning();
+      
+      return results.length > 0 ? results[0] : null;
+    } catch (error) {
+      console.error(`Error archiving product ${productId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reactivate an archived product
+   */
+  static async Activate(productId: number) {
+    try {
+      const results = await db.update(Products)
+        .set({ 
+          IsActive: true,
+          UpdatedAt: new Date()
+        })
+        .where(eq(Products.ProductId, productId))
+        .returning();
+      
+      return results.length > 0 ? results[0] : null;
+    } catch (error) {
+      console.error(`Error activating product ${productId}:`, error);
       throw error;
     }
   }

@@ -1,168 +1,346 @@
 import { db } from './connection';
-import { Roles, Users, Categories, Products, Members } from './schema';
-import * as bcrypt from 'bcrypt';
-import { eq } from 'drizzle-orm';
+import { Roles, Users, Categories, Products, Members, Transactions, TransactionItems, Events, MemberActivities } from './schema';
+import bcrypt from 'bcrypt';
 
 /**
  * Seed the database with initial data
  */
-async function Seed() {
+async function seed() {
   try {
-    console.log('Starting database seeding...');
-
+    console.log('Starting database seed...');
+    
+    // Check if we already have data
+    const existingRoles = await db.select().from(Roles);
+    if (existingRoles.length > 0) {
+      console.log('Database already has data. Skipping seed.');
+      return;
+    }
+    
+    // Seed roles
     console.log('Seeding roles...');
-    let adminRoleItem = await db.query.Roles.findFirst({ where: eq(Roles.Name, 'Administrator') });
-    if (!adminRoleItem) {
-      const [inserted] = await db.insert(Roles).values({ Name: 'Administrator', Description: 'Full system access' }).returning();
-      adminRoleItem = inserted;
-      console.log(`Created role Administrator (ID ${adminRoleItem.RoleId})`);
-    } else {
-      console.log(`Role Administrator already exists (ID ${adminRoleItem.RoleId})`);
+    const roles = await db.insert(Roles).values([
+      { Name: 'Administrator', Description: 'System administrator with full access' },
+      { Name: 'Manager', Description: 'Manager with access to admin functions' },
+      { Name: 'Cashier', Description: 'Cashier with access to POS system' },
+      { Name: 'Member', Description: 'Cooperative member' }
+    ]).returning();
+    console.log(`Seeded ${roles.length} roles`);
+    
+    // Get role IDs
+    const adminRoleId = roles.find(r => r.Name === 'Administrator')?.RoleId;
+    const cashierRoleId = roles.find(r => r.Name === 'Cashier')?.RoleId;
+    const memberRoleId = roles.find(r => r.Name === 'Member')?.RoleId;
+    
+    if (!adminRoleId || !cashierRoleId || !memberRoleId) {
+      throw new Error('Failed to retrieve role IDs');
     }
-
-    let cashierRoleItem = await db.query.Roles.findFirst({ where: eq(Roles.Name, 'Cashier') });
-    if (!cashierRoleItem) {
-      const [inserted] = await db.insert(Roles).values({ Name: 'Cashier', Description: 'Day-to-day operations access' }).returning();
-      cashierRoleItem = inserted;
-      console.log(`Created role Cashier (ID ${cashierRoleItem.RoleId})`);
-    } else {
-      console.log(`Role Cashier already exists (ID ${cashierRoleItem.RoleId})`);
-    }
-
-    let managerRoleItem = await db.query.Roles.findFirst({ where: eq(Roles.Name, 'Manager') });
-    if (!managerRoleItem) {
-      const [inserted] = await db.insert(Roles).values({ Name: 'Manager', Description: 'Department management access' }).returning();
-      managerRoleItem = inserted;
-      console.log(`Created role Manager (ID ${managerRoleItem.RoleId})`);
-    } else {
-      console.log(`Role Manager already exists (ID ${managerRoleItem.RoleId})`);
-    }
-
-    let memberRoleItem = await db.query.Roles.findFirst({ where: eq(Roles.Name, 'Member') });
-    if (!memberRoleItem) {
-      const [inserted] = await db.insert(Roles).values({ Name: 'Member', Description: 'Member access' }).returning();
-      memberRoleItem = inserted;
-      console.log(`Created role Member (ID ${memberRoleItem.RoleId})`);
-    } else {
-      console.log(`Role Member already exists (ID ${memberRoleItem.RoleId})`);
-    }
-
-    console.log('Seeding default admin user...');
-    let adminUserItem = await db.query.Users.findFirst({ where: eq(Users.Email, 'admin@pandol.coop') });
-    if (!adminUserItem) {
-      const passwordHash = await bcrypt.hash('admin123', 10);
-      const [inserted] = await db.insert(Users).values({
-        Name: 'Admin User',
-        Email: 'admin@pandol.coop',
+    
+    // Seed users
+    console.log('Seeding users...');
+    const passwordHash = await bcrypt.hash('password123', 10);
+    
+    const users = await db.insert(Users).values([
+      { 
+        Name: 'Admin User', 
+        Email: 'admin@example.com',
         PasswordHash: passwordHash,
-        RoleId: adminRoleItem.RoleId
-      }).returning();
-      adminUserItem = inserted;
-      console.log(`Created admin user: ${adminUserItem.Email}`);
-    } else {
-      console.log(`Admin user already exists: ${adminUserItem.Email}`);
-    }
-
-    console.log('Seeding super admin user...');
-    let superAdminItem = await db.query.Users.findFirst({ where: eq(Users.Email, 'superadmin@pandol.coop') });
-    if (!superAdminItem) {
-      const providedHash = '$2y$10$BJPzAATCmSqAu8yNIj7EEOKNXnyg97fW.Ar84MYboefZ2h1S5JxPm';
-      const [inserted] = await db.insert(Users).values({
-        Name: 'Super Admin',
-        Email: 'superadmin@pandol.coop',
-        PasswordHash: providedHash,
-        RoleId: adminRoleItem.RoleId
-      }).returning();
-      superAdminItem = inserted;
-      console.log(`Created super admin user: ${superAdminItem.Email}`);
-    } else {
-      console.log(`Super admin user already exists: ${superAdminItem.Email}`);
-    }
-
-    console.log('Seeding product categories...');
-    const categoryData = [
-      { name: 'Grocery', desc: 'Basic grocery items' },
-      { name: 'Dairy', desc: 'Milk, cheese, and other dairy products' },
-      { name: 'Beverages', desc: 'Drinks, juices, and water' },
-      { name: 'Personal Care', desc: 'Personal hygiene and care products' },
-      { name: 'Household', desc: 'Cleaning supplies and household essentials' }
-    ];
-    const categoryItems: Record<string, any> = {};
-    for (const { name, desc } of categoryData) {
-      let cat = await db.query.Categories.findFirst({ where: eq(Categories.Name, name) });
-      if (!cat) {
-        const [inserted] = await db.insert(Categories).values({ Name: name, Description: desc }).returning();
-        cat = inserted;
-        console.log(`Created category ${name}`);
-      } else {
-        console.log(`Category ${name} already exists`);
+        RoleId: adminRoleId
+      },
+      { 
+        Name: 'Cashier User', 
+        Email: 'cashier@example.com',
+        PasswordHash: passwordHash,
+        RoleId: cashierRoleId
+      },
+      { 
+        Name: 'Juan Dela Cruz', 
+        Email: 'juan@example.com',
+        PasswordHash: passwordHash,
+        RoleId: memberRoleId
+      },
+      { 
+        Name: 'Maria Santos', 
+        Email: 'maria@example.com',
+        PasswordHash: passwordHash,
+        RoleId: memberRoleId
       }
-      categoryItems[name] = cat;
+    ]).returning();
+    console.log(`Seeded ${users.length} users`);
+    
+    // Get user IDs
+    const adminUserId = users.find(u => u.Email === 'admin@example.com')?.UserId;
+    const cashierUserId = users.find(u => u.Email === 'cashier@example.com')?.UserId;
+    const juanUserId = users.find(u => u.Email === 'juan@example.com')?.UserId;
+    const mariaUserId = users.find(u => u.Email === 'maria@example.com')?.UserId;
+    
+    if (!adminUserId || !cashierUserId || !juanUserId || !mariaUserId) {
+      throw new Error('Failed to retrieve user IDs');
     }
-
-    console.log('Seeding initial products...');
-    const productData = [
-      { name: 'Organic Rice', sku: 'GRO-RICE-001', price: '500.00', qty: 50, cat: 'Grocery', desc: 'Locally sourced organic rice' },
-      { name: 'Fresh Eggs', sku: 'DAI-EGGS-001', price: '180.00', qty: 30, cat: 'Dairy', desc: 'Farm fresh eggs (1 tray)' },
-      { name: 'Coconut Oil', sku: 'GRO-OIL-001', price: '250.00', qty: 25, cat: 'Grocery', desc: 'Virgin coconut oil (1L)' },
-      { name: 'Coffee Beans', sku: 'BEV-COF-001', price: '300.00', qty: 15, cat: 'Beverages', desc: 'Locally grown coffee beans (500g)' },
-      { name: 'Honey', sku: 'GRO-HON-001', price: '280.00', qty: 20, cat: 'Grocery', desc: 'Pure organic honey (500ml)' }
-    ];
-    for (const p of productData) {
-      let prod = await db.query.Products.findFirst({ where: eq(Products.Sku, p.sku) });
-      if (!prod) {
-        await db.insert(Products).values({
-          Name: p.name,
-          Description: p.desc,
-          Sku: p.sku,
-          Price: p.price,
-          StockQuantity: p.qty,
-          CategoryId: categoryItems[p.cat].CategoryId
-        });
-        console.log(`Created product ${p.name}`);
-      } else {
-        console.log(`Product ${prod.Sku} already exists`);
+    
+    // Seed members
+    console.log('Seeding members...');
+    const members = await db.insert(Members).values([
+      {
+        Name: 'Juan Dela Cruz',
+        Email: 'juan@example.com',
+        Phone: '+63 912 345 6789',
+        Address: '123 Main St, Manila',
+        CreditBalance: '500.00',
+        UserId: juanUserId
+      },
+      {
+        Name: 'Maria Santos',
+        Email: 'maria@example.com',
+        Phone: '+63 923 456 7890',
+        Address: '456 Oak St, Quezon City',
+        CreditBalance: '750.50',
+        UserId: mariaUserId
       }
+    ]).returning();
+    console.log(`Seeded ${members.length} members`);
+    
+    // Get member IDs
+    const juanMemberId = members.find(m => m.Email === 'juan@example.com')?.MemberId;
+    const mariaMemberId = members.find(m => m.Email === 'maria@example.com')?.MemberId;
+    
+    if (!juanMemberId || !mariaMemberId) {
+      throw new Error('Failed to retrieve member IDs');
     }
-
-    console.log('Seeding initial members...');
-    const memberData = [
-      { name: 'Maria Santos', email: 'maria@example.com', phone: '+639123456789', address: '123 Main St, Metro Manila', credit: '1000.00' },
-      { name: 'Juan Dela Cruz', email: 'juan@example.com', phone: '+639234567890', address: '456 Second St, Metro Manila', credit: '500.00' },
-      { name: 'Ana Reyes', email: 'ana@example.com', phone: '+639345678901', address: '789 Third St, Metro Manila', credit: '1500.00' },
-      { name: 'Pedro Lim', email: 'pedro@example.com', phone: '+639456789012', address: '246 Fourth St, Metro Manila', credit: '750.00' },
-      { name: 'Sofia Garcia', email: 'sofia@example.com', phone: '+639567890123', address: '135 Fifth St, Metro Manila', credit: '2000.00' }
-    ];
-    for (const m of memberData) {
-      let mem = await db.query.Members.findFirst({ where: eq(Members.Email, m.email) });
-      if (!mem) {
-        await db.insert(Members).values({
-          Name: m.name,
-          Email: m.email,
-          Phone: m.phone,
-          Address: m.address,
-          CreditBalance: m.credit
-        });
-        console.log(`Created member ${m.name}`);
-      } else {
-        console.log(`Member ${m.email} already exists`);
+    
+    // Seed categories
+    console.log('Seeding categories...');
+    const categories = await db.insert(Categories).values([
+      { Name: 'Grocery', Description: 'Grocery items' },
+      { Name: 'Electronics', Description: 'Electronic devices and accessories' },
+      { Name: 'Household', Description: 'Household items and supplies' },
+      { Name: 'School Supplies', Description: 'Educational materials and office supplies' },
+      { Name: 'Beverages', Description: 'Drinks and liquid refreshments' }
+    ]).returning();
+    console.log(`Seeded ${categories.length} categories`);
+    
+    // Get category IDs
+    const groceryCategoryId = categories.find(c => c.Name === 'Grocery')?.CategoryId;
+    const electronicsCategoryId = categories.find(c => c.Name === 'Electronics')?.CategoryId;
+    const householdCategoryId = categories.find(c => c.Name === 'Household')?.CategoryId;
+    const schoolCategoryId = categories.find(c => c.Name === 'School Supplies')?.CategoryId;
+    const beveragesCategoryId = categories.find(c => c.Name === 'Beverages')?.CategoryId;
+    
+    if (!groceryCategoryId || !electronicsCategoryId || !householdCategoryId || !schoolCategoryId || !beveragesCategoryId) {
+      throw new Error('Failed to retrieve category IDs');
+    }
+    
+    // Seed products
+    console.log('Seeding products...');
+    const products = await db.insert(Products).values([
+      {
+        Name: 'Rice',
+        Description: 'Premium white rice, 5kg',
+        Sku: 'GRO-001',
+        Price: '250.00',
+        StockQuantity: 100,
+        CategoryId: groceryCategoryId,
+        Supplier: 'ABC Farm Supplies',
+        Image: '/products/rice.jpg'
+      },
+      {
+        Name: 'USB Flash Drive',
+        Description: '16GB USB 3.0 Flash Drive',
+        Sku: 'ELE-001',
+        Price: '350.00',
+        StockQuantity: 30,
+        CategoryId: electronicsCategoryId,
+        Supplier: 'Tech Gadgets Inc',
+        Image: '/products/usb.jpg'
+      },
+      {
+        Name: 'Dish Soap',
+        Description: 'Liquid dish soap, 500ml',
+        Sku: 'HOU-001',
+        Price: '75.50',
+        StockQuantity: 50,
+        CategoryId: householdCategoryId,
+        Supplier: 'Home Clean Supplies',
+        Image: '/products/dish-soap.jpg'
+      },
+      {
+        Name: 'Notebook',
+        Description: 'College-ruled notebook, 100 pages',
+        Sku: 'SCH-001',
+        Price: '45.00',
+        StockQuantity: 200,
+        CategoryId: schoolCategoryId,
+        Supplier: 'ABC School Supplies',
+        Image: '/products/notebook.jpg'
+      },
+      {
+        Name: 'Bottled Water',
+        Description: 'Purified water, 500ml',
+        Sku: 'BEV-001',
+        Price: '15.00',
+        StockQuantity: 500,
+        CategoryId: beveragesCategoryId,
+        Supplier: 'Clean Waters Inc',
+        Image: '/products/water.jpg'
       }
+    ]).returning();
+    console.log(`Seeded ${products.length} products`);
+    
+    // Get product IDs
+    const riceProductId = products.find(p => p.Sku === 'GRO-001')?.ProductId;
+    const usbProductId = products.find(p => p.Sku === 'ELE-001')?.ProductId;
+    const dishSoapProductId = products.find(p => p.Sku === 'HOU-001')?.ProductId;
+    const notebookProductId = products.find(p => p.Sku === 'SCH-001')?.ProductId;
+    const waterProductId = products.find(p => p.Sku === 'BEV-001')?.ProductId;
+    
+    if (!riceProductId || !usbProductId || !dishSoapProductId || !notebookProductId || !waterProductId) {
+      throw new Error('Failed to retrieve product IDs');
     }
+    
+    // Seed transactions
+    console.log('Seeding transactions...');
+    const transactions = await db.insert(Transactions).values([
+      {
+        Timestamp: new Date(Date.now() - 86400000 * 2), // 2 days ago
+        UserId: cashierUserId,
+        MemberId: juanMemberId,
+        TotalAmount: '545.00',
+        PaymentMethod: 'Cash'
+      },
+      {
+        Timestamp: new Date(Date.now() - 86400000), // 1 day ago
+        UserId: cashierUserId,
+        MemberId: mariaMemberId,
+        TotalAmount: '1250.00',
+        PaymentMethod: 'Credit'
+      },
+      {
+        Timestamp: new Date(), // Today
+        UserId: cashierUserId,
+        TotalAmount: '90.00',
+        PaymentMethod: 'Cash'
+      }
+    ]).returning();
+    console.log(`Seeded ${transactions.length} transactions`);
+    
+    // Seed transaction items
+    console.log('Seeding transaction items...');
+    const transactionItems = await db.insert(TransactionItems).values([
+      {
+        TransactionId: transactions[0].TransactionId,
+        ProductId: riceProductId,
+        Quantity: 1,
+        PriceAtTimeOfSale: '250.00'
+      },
+      {
+        TransactionId: transactions[0].TransactionId,
+        ProductId: waterProductId,
+        Quantity: 2,
+        PriceAtTimeOfSale: '15.00'
+      },
+      {
+        TransactionId: transactions[0].TransactionId,
+        ProductId: notebookProductId,
+        Quantity: 1,
+        PriceAtTimeOfSale: '45.00'
+      },
+      {
+        TransactionId: transactions[0].TransactionId,
+        ProductId: dishSoapProductId,
+        Quantity: 1,
+        PriceAtTimeOfSale: '75.50'
+      },
+      {
+        TransactionId: transactions[1].TransactionId,
+        ProductId: usbProductId,
+        Quantity: 1,
+        PriceAtTimeOfSale: '350.00'
+      },
+      {
+        TransactionId: transactions[1].TransactionId,
+        ProductId: riceProductId,
+        Quantity: 2,
+        PriceAtTimeOfSale: '250.00'
+      },
+      {
+        TransactionId: transactions[2].TransactionId,
+        ProductId: waterProductId,
+        Quantity: 6,
+        PriceAtTimeOfSale: '15.00'
+      }
+    ]).returning();
+    console.log(`Seeded ${transactionItems.length} transaction items`);
 
-    console.log('Database seeding completed successfully');
+    // Seed upcoming events
+    console.log('Seeding events...');
+    const now = new Date();
+    const events = await db.insert(Events).values([
+      {
+        Title: "Inventory Restocking",
+        Description: "Regular inventory restocking of all products",
+        EventDate: new Date(now.getFullYear(), now.getMonth() + 1, 15), // Next month, day 15
+        Type: "Operation"
+      },
+      {
+        Title: "Financial Literacy Workshop",
+        Description: "Workshop to help members understand financial management",
+        EventDate: new Date(now.getFullYear(), now.getMonth() + 1, 20), // Next month, day 20
+        Type: "Community"
+      },
+      {
+        Title: "Monthly Financial Review",
+        Description: "Regular monthly financial review meeting",
+        EventDate: new Date(now.getFullYear(), now.getMonth() + 1, 30), // Next month, day 30
+        Type: "Management"
+      },
+      {
+        Title: "Member Assembly",
+        Description: "Annual general assembly for all cooperative members",
+        EventDate: new Date(now.getFullYear(), now.getMonth() + 2, 5), // Two months from now, day 5
+        Type: "Community"
+      }
+    ]).returning();
+    console.log(`Seeded ${events.length} events`);
+
+    // Seed member activities
+    console.log('Seeding member activities...');
+    const memberActivities = await db.insert(MemberActivities).values([
+      {
+        MemberId: mariaMemberId,
+        Action: "Made a purchase",
+        Amount: "1250.00",
+        Timestamp: new Date(Date.now() - 3600000 * 2), // 2 hours ago
+        RelatedTransactionId: transactions[1].TransactionId
+      },
+      {
+        MemberId: juanMemberId,
+        Action: "Paid credit balance",
+        Amount: "500.00",
+        Timestamp: new Date(Date.now() - 3600000 * 5) // 5 hours ago
+      },
+      {
+        MemberId: mariaMemberId,
+        Action: "Updated profile information",
+        Timestamp: new Date(Date.now() - 86400000) // Yesterday
+      },
+      {
+        MemberId: juanMemberId,
+        Action: "Made a purchase",
+        Amount: "450.25",
+        Timestamp: new Date(Date.now() - 86400000) // Yesterday
+      },
+      {
+        MemberId: mariaMemberId,
+        Action: "Requested credit increase",
+        Timestamp: new Date(Date.now() - 86400000 * 2) // 2 days ago
+      }
+    ]).returning();
+    console.log(`Seeded ${memberActivities.length} member activities`);
+    
+    console.log('Database seed completed successfully!');
   } catch (error) {
     console.error('Error seeding database:', error);
-    throw error;
   }
 }
 
 // Run the seed function
-Seed()
-  .then(() => {
-    console.log('Seed completed');
-    process.exit(0);
-  })
-  .catch((error) => {
-    console.error('Seed failed:', error);
-    process.exit(1);
-  }); 
+seed(); 

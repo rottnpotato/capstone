@@ -437,6 +437,9 @@ export default function POSPage() {
                             {product.Stock < 10 && (
                               <Badge className="absolute top-2 left-2 bg-red-500">Low Stock</Badge>
                             )}
+                            {product.ExpiryDate && new Date(product.ExpiryDate) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) && (
+                              <Badge className="absolute top-2 right-2 bg-amber-500">Expires Soon</Badge>
+                            )}
                           </div>
                           <h3
                             className="font-medium text-gray-900 line-clamp-1"
@@ -624,6 +627,26 @@ export default function POSPage() {
                     <span className="text-sm text-gray-600">Stock: {selectedProduct.Stock}</span>
                   </div>
                 </div>
+
+                {selectedProduct.ExpiryDate && (
+                  <div className="mt-2 border-t pt-2">
+                    <div className="flex items-center gap-2">
+                      <Info className="h-4 w-4 text-gray-600" />
+                      <span className="text-sm text-gray-600">
+                        Expiry Date: {new Date(selectedProduct.ExpiryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    </div>
+                    {new Date(selectedProduct.ExpiryDate) < new Date() ? (
+                      <Badge variant="outline" className="mt-1 bg-red-50 text-red-600 border-red-200">
+                        Expired
+                      </Badge>
+                    ) : new Date(selectedProduct.ExpiryDate) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) ? (
+                      <Badge variant="outline" className="mt-1 bg-amber-50 text-amber-600 border-amber-200">
+                        Expires Soon
+                      </Badge>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-3 mt-2">

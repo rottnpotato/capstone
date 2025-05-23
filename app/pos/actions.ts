@@ -5,7 +5,7 @@ import { ProductRepository } from '@/db/repositories/ProductRepository';
 import { MemberRepository } from '@/db/repositories/MemberRepository';
 import { TransactionRepository } from '@/db/repositories/TransactionRepository';
 import { Products, Members, Categories } from '@/db/schema';
-import { eq, like, or } from 'drizzle-orm';
+import { eq, like, or, and } from 'drizzle-orm';
 
 // Product interfaces
 export interface Product {
@@ -18,6 +18,8 @@ export interface Product {
   Stock: number;
   Description: string;
   Discount?: number;
+  ExpiryDate?: string | null;
+  IsActive?: boolean;
 }
 
 // Member interface
@@ -54,9 +56,12 @@ export interface Transaction {
 // Get all products
 export async function GetProducts(): Promise<Product[]> {
   try {
-    const productsData = await ProductRepository.GetAll();
+    const productsData = await db.select()
+      .from(Products)
+      .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
+      .where(eq(Products.IsActive, true)); // Only get active products
     
-    return productsData.map(product => ({
+    return productsData.map((product: any) => ({
       Id: product.Products.ProductId.toString(),
       Name: product.Products.Name,
       Price: parseFloat(product.Products.Price),
@@ -65,6 +70,8 @@ export async function GetProducts(): Promise<Product[]> {
       Barcode: product.Products.Sku,
       Stock: product.Products.StockQuantity,
       Description: product.Products.Description || "",
+      ExpiryDate: product.Products.ExpiryDate ? new Date(product.Products.ExpiryDate).toISOString() : null,
+      IsActive: product.Products.IsActive
     }));
   } catch (error) {
     console.error("Error fetching products:", error);
@@ -95,9 +102,14 @@ export async function GetProductsByCategory(categoryName: string): Promise<Produ
     const productsData = await db.select()
       .from(Products)
       .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
-      .where(eq(Products.CategoryId, categoryId));
+      .where(
+        and(
+          eq(Products.CategoryId, categoryId),
+          eq(Products.IsActive, true)
+        )
+      );
     
-    return productsData.map(product => ({
+    return productsData.map((product: any) => ({
       Id: product.Products.ProductId.toString(),
       Name: product.Products.Name,
       Price: parseFloat(product.Products.Price),
@@ -106,6 +118,8 @@ export async function GetProductsByCategory(categoryName: string): Promise<Produ
       Barcode: product.Products.Sku,
       Stock: product.Products.StockQuantity,
       Description: product.Products.Description || "",
+      ExpiryDate: product.Products.ExpiryDate ? new Date(product.Products.ExpiryDate).toISOString() : null,
+      IsActive: product.Products.IsActive
     }));
   } catch (error) {
     console.error(`Error fetching products for category ${categoryName}:`, error);
@@ -120,14 +134,17 @@ export async function SearchProducts(searchQuery: string): Promise<Product[]> {
       .from(Products)
       .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
       .where(
-        or(
-          like(Products.Name, `%${searchQuery}%`),
-          like(Products.Sku, `%${searchQuery}%`),
-          like(Products.Description || "", `%${searchQuery}%`)
+        and(
+          or(
+            like(Products.Name, `%${searchQuery}%`),
+            like(Products.Sku, `%${searchQuery}%`),
+            like(Products.Description || "", `%${searchQuery}%`)
+          ),
+          eq(Products.IsActive, true)
         )
       );
     
-    return productsData.map(product => ({
+    return productsData.map((product: any) => ({
       Id: product.Products.ProductId.toString(),
       Name: product.Products.Name,
       Price: parseFloat(product.Products.Price),
@@ -136,6 +153,8 @@ export async function SearchProducts(searchQuery: string): Promise<Product[]> {
       Barcode: product.Products.Sku,
       Stock: product.Products.StockQuantity,
       Description: product.Products.Description || "",
+      ExpiryDate: product.Products.ExpiryDate ? new Date(product.Products.ExpiryDate).toISOString() : null,
+      IsActive: product.Products.IsActive
     }));
   } catch (error) {
     console.error(`Error searching products with query ${searchQuery}:`, error);

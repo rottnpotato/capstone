@@ -1,7 +1,8 @@
-import { pgTable, serial, varchar, text, integer, timestamp, decimal, uniqueIndex, foreignKey, primaryKey, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, text, integer, timestamp, decimal, uniqueIndex, foreignKey, primaryKey, pgEnum, boolean } from 'drizzle-orm/pg-core';
 
 // Enums (if applicable, e.g., for Credit Type)
 export const CreditTypeEnum = pgEnum('CreditType', ['Earned', 'Spent', 'Adjustment']);
+export const EventTypeEnum = pgEnum('EventType', ['Operation', 'Community', 'Management']);
 
 export const Roles = pgTable('Roles', {
   RoleId: serial('RoleId').primaryKey(),
@@ -51,6 +52,8 @@ export const Products = pgTable('Products', {
   CategoryId: integer('CategoryId').notNull().references(() => Categories.CategoryId),
   Image: text('Image'),
   Supplier: varchar('Supplier', { length: 255 }),
+  ExpiryDate: timestamp('ExpiryDate', { withTimezone: true }),
+  IsActive: boolean('IsActive').default(true).notNull(),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -83,6 +86,27 @@ export const Credits = pgTable('Credits', {
   Type: CreditTypeEnum('Type').notNull(),
   RelatedTransactionId: integer('RelatedTransactionId').references(() => Transactions.TransactionId), // Optional link to transaction
   Timestamp: timestamp('Timestamp', { withTimezone: true }).defaultNow().notNull(),
+  CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
+  UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const Events = pgTable('Events', {
+  EventId: serial('EventId').primaryKey(),
+  Title: varchar('Title', { length: 255 }).notNull(),
+  Description: text('Description'),
+  EventDate: timestamp('EventDate', { withTimezone: true }).notNull(),
+  Type: EventTypeEnum('Type').notNull(),
+  CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
+  UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const MemberActivities = pgTable('MemberActivities', {
+  ActivityId: serial('ActivityId').primaryKey(),
+  MemberId: integer('MemberId').notNull().references(() => Members.MemberId),
+  Action: varchar('Action', { length: 255 }).notNull(),
+  Amount: decimal('Amount', { precision: 10, scale: 2 }),
+  Timestamp: timestamp('Timestamp', { withTimezone: true }).defaultNow().notNull(),
+  RelatedTransactionId: integer('RelatedTransactionId').references(() => Transactions.TransactionId),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 }); 
