@@ -12,7 +12,7 @@ const figtree = Figtree({
 })
 
 export const metadata: Metadata = {
-  title: "Pandol Cooperative - POS & Credit Management",
+  title: "Pandol Multi-Purpose Cooperative Management System",
   description: "A member-owned financial institution with integrated POS and credit management system",
     generator: 'rottenpotato'
 }

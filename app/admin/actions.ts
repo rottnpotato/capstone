@@ -5,9 +5,9 @@ import { ProductRepository } from '@/db/repositories/ProductRepository';
 import { MemberRepository } from '@/db/repositories/MemberRepository';
 import { EventRepository } from '@/db/repositories/EventRepository';
 import { MemberActivityRepository } from '@/db/repositories/MemberActivityRepository';
-import { count, sql, desc } from 'drizzle-orm';
+import { count, sql, desc, and, gte, lte, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { Transactions, Products, Members, Credits } from '@/db/schema';
+import { Transactions, Products, Members, Credits, TransactionItems } from '@/db/schema';
 
 // Transaction interfaces for admin dashboard
 export interface AdminTransaction {
@@ -172,12 +172,13 @@ export async function GetDashboardStats(timeRange: string = 'week'): Promise<Das
     switch (timeRange) {
       case 'day':
         startDate.setHours(0, 0, 0, 0);
+        previousStartDate = new Date(startDate);
         previousStartDate.setDate(previousStartDate.getDate() - 1);
-        previousStartDate.setHours(0, 0, 0, 0);
         previousEndDate = new Date(startDate);
         previousEndDate.setMilliseconds(-1);
         break;
       case 'week':
+        // Start from Sunday of current week
         startDate.setDate(startDate.getDate() - startDate.getDay());
         startDate.setHours(0, 0, 0, 0);
         previousStartDate = new Date(startDate);
@@ -205,15 +206,21 @@ export async function GetDashboardStats(timeRange: string = 'week'): Promise<Das
     
     // Get current period sales
     const currentSales = await db.select({
-      total: sql<string>`SUM(${Transactions.TotalAmount})`
+      total: sql<string>`COALESCE(SUM(${Transactions.TotalAmount}), '0')`
     }).from(Transactions)
-    .where(sql`${Transactions.Timestamp} >= ${startDate} AND ${Transactions.Timestamp} <= ${endDate}`);
+    .where(and(
+      gte(Transactions.Timestamp, startDate),
+      lte(Transactions.Timestamp, endDate)
+    ));
     
     // Get previous period sales
     const previousSales = await db.select({
-      total: sql<string>`SUM(${Transactions.TotalAmount})`
+      total: sql<string>`COALESCE(SUM(${Transactions.TotalAmount}), '0')`
     }).from(Transactions)
-    .where(sql`${Transactions.Timestamp} >= ${previousStartDate} AND ${Transactions.Timestamp} <= ${previousEndDate}`);
+    .where(and(
+      gte(Transactions.Timestamp, previousStartDate),
+      lte(Transactions.Timestamp, previousEndDate)
+    ));
     
     const currentSalesTotal = parseFloat(currentSales[0]?.total || '0');
     const previousSalesTotal = parseFloat(previousSales[0]?.total || '0');
@@ -231,12 +238,20 @@ export async function GetDashboardStats(timeRange: string = 'week'): Promise<Das
     const currentActiveMembers = await db.select({
       count: sql<number>`COUNT(DISTINCT ${Transactions.MemberId})`
     }).from(Transactions)
-    .where(sql`${Transactions.Timestamp} >= ${startDate} AND ${Transactions.Timestamp} <= ${endDate} AND ${Transactions.MemberId} IS NOT NULL`);
+    .where(and(
+      gte(Transactions.Timestamp, startDate),
+      lte(Transactions.Timestamp, endDate),
+      sql`${Transactions.MemberId} IS NOT NULL`
+    ));
     
     const previousActiveMembers = await db.select({
       count: sql<number>`COUNT(DISTINCT ${Transactions.MemberId})`
     }).from(Transactions)
-    .where(sql`${Transactions.Timestamp} >= ${previousStartDate} AND ${Transactions.Timestamp} <= ${previousEndDate} AND ${Transactions.MemberId} IS NOT NULL`);
+    .where(and(
+      gte(Transactions.Timestamp, previousStartDate),
+      lte(Transactions.Timestamp, previousEndDate),
+      sql`${Transactions.MemberId} IS NOT NULL`
+    ));
     
     const currentActiveMembersCount = currentActiveMembers[0]?.count || 0;
     const previousActiveMembersCount = previousActiveMembers[0]?.count || 0;
@@ -250,25 +265,61 @@ export async function GetDashboardStats(timeRange: string = 'week'): Promise<Das
       membersTrend = membersChange >= 0 ? 'up' : 'down';
     }
     
-    // Get total inventory count
-    const totalInventory = await db.select({
-      total: sql<number>`SUM(${Products.StockQuantity})`
-    }).from(Products);
+    // Get current total inventory count
+    const currentInventory = await db.select({
+      total: sql<number>`COALESCE(SUM(${Products.StockQuantity}), 0)`
+    }).from(Products)
+    .where(eq(Products.IsActive, true));
     
-    // For inventory change, we don't have historical data, so we'll use a small random value
-    const inventoryTotal = totalInventory[0]?.total || 0;
-    const inventoryChange = Math.random() * 6 - 3; // Random value between -3% and +3%
-    const inventoryTrend: 'up' | 'down' = inventoryChange >= 0 ? 'up' : 'down';
+    // Calculate previous inventory by looking at transactions within period
+    const inventoryChanges = await db.select({
+      total: sql<number>`COALESCE(SUM(${TransactionItems.Quantity}), 0)`
+    }).from(Transactions)
+    .innerJoin(TransactionItems, eq(Transactions.TransactionId, TransactionItems.TransactionId))
+    .where(and(
+      gte(Transactions.Timestamp, startDate),
+      lte(Transactions.Timestamp, endDate)
+    ));
     
-    // Get total credit outstanding
-    const creditOutstanding = await db.select({
-      total: sql<string>`SUM(${Members.CreditBalance})`
+    const inventoryTotal = currentInventory[0]?.total || 0;
+    const periodSalesQuantity = inventoryChanges[0]?.total || 0;
+    const previousInventoryTotal = inventoryTotal + periodSalesQuantity;
+    
+    // Calculate inventory change percentage
+    let inventoryChange = 0;
+    let inventoryTrend: 'up' | 'down' = 'up';
+    
+    if (previousInventoryTotal > 0) {
+      inventoryChange = ((inventoryTotal - previousInventoryTotal) / previousInventoryTotal) * 100;
+      inventoryTrend = inventoryChange >= 0 ? 'up' : 'down';
+    }
+    
+    // Get current total credit outstanding
+    const currentCreditOutstanding = await db.select({
+      total: sql<string>`COALESCE(SUM(${Members.CreditBalance}), '0')`
     }).from(Members);
     
-    // For credit change, we don't have historical data, so we'll use a small random value
-    const creditTotal = parseFloat(creditOutstanding[0]?.total || '0');
-    const creditChange = Math.random() * 8 - 2; // Random value between -2% and +6%
-    const creditTrend: 'up' | 'down' = creditChange >= 0 ? 'up' : 'down';
+    // Calculate previous credit outstanding using Credits table
+    const creditChanges = await db.select({
+      total: sql<string>`COALESCE(SUM(${Credits.Amount}), '0')`
+    }).from(Credits)
+    .where(and(
+      gte(Credits.Timestamp, startDate),
+      lte(Credits.Timestamp, endDate)
+    ));
+    
+    const creditTotal = parseFloat(currentCreditOutstanding[0]?.total || '0');
+    const periodCreditChange = parseFloat(creditChanges[0]?.total || '0');
+    const previousCreditTotal = creditTotal - periodCreditChange;
+    
+    // Calculate credit change percentage
+    let creditChange = 0;
+    let creditTrend: 'up' | 'down' = 'up';
+    
+    if (Math.abs(previousCreditTotal) > 0) {
+      creditChange = ((creditTotal - previousCreditTotal) / Math.abs(previousCreditTotal)) * 100;
+      creditTrend = creditChange >= 0 ? 'up' : 'down';
+    }
     
     return {
       totalSales: {

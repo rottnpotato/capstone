@@ -73,8 +73,8 @@ export default function Home() {
             <div className="h-8 w-8 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center">
               <CreditCard className="h-4 w-4 text-white" />
             </div>
-            <span className="text-xl font-bold text-gray-900">Pandol Multipurpose Cooperative</span>
-          </div>
+            <span className="text-xl font-bold text-gray-900">Pandol Multi-Purpose Cooperative Management System</span>
+          </div> 
           <nav className="hidden md:flex items-center space-x-6">
             {/* <a href="#about" className="text-sm font-medium text-gray-700 hover:text-amber-600 transition-colors">
               About Us

@@ -136,7 +136,7 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
               <div className="h-8 w-8 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center">
                 <CreditCard className="h-4 w-4 text-white" />
               </div>
-              <span className="text-xl font-bold text-gray-900">Pandol Multipurpose Cooperative</span>
+              <span className="text-lg font-bold text-gray-900">Pandol Multi-Purpose Cooperative <br /> Management System</span>
             </Link>
           </div>
 
