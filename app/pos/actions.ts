@@ -6,6 +6,7 @@ import { MemberRepository } from '@/db/repositories/MemberRepository';
 import { TransactionRepository } from '@/db/repositories/TransactionRepository';
 import { Products, Members, Categories } from '@/db/schema';
 import { eq, like, or, and } from 'drizzle-orm';
+import { SendPurchaseNotification } from '@/lib/notifications';
 
 // Product interfaces
 export interface Product {
@@ -183,7 +184,7 @@ export async function GetMembers(): Promise<Member[]> {
       Name: member.Name,
       MemberId: `M${member.MemberId.toString().padStart(3, '0')}`, // Format to match mock data
       Email: member.Email,
-      CreditLimit: 0, // Placeholder - add actual credit limit field to DB
+      CreditLimit: parseFloat(member.CreditLimit || "0"),
       CurrentCredit: parseFloat(member.CreditBalance || "0"),
     }));
   } catch (error) {
@@ -209,7 +210,7 @@ export async function SearchMembers(searchQuery: string): Promise<Member[]> {
       Name: member.Name,
       MemberId: `M${member.MemberId.toString().padStart(3, '0')}`, // Format to match mock data
       Email: member.Email,
-      CreditLimit: 0, // Placeholder - add actual credit limit field to DB
+      CreditLimit: parseFloat(member.CreditLimit || "0"),
       CurrentCredit: parseFloat(member.CreditBalance || "0"),
     }));
   } catch (error) {
@@ -275,6 +276,24 @@ export async function CreateTransaction(
   userId: number = 1 // Default cashier ID - would typically come from auth context
 ): Promise<{ success: boolean; transactionId?: string; error?: string }> {
   try {
+    // Check credit limit if this is a credit payment
+    if (paymentMethod === "credit" && memberId) {
+      const member = await MemberRepository.GetById(memberId);
+      if (member) {
+        const currentCredit = parseFloat(member.CreditBalance || "0");
+        const creditLimit = parseFloat(member.CreditLimit || "0");
+        const newCredit = currentCredit + totalAmount;
+        
+        // Check if transaction would exceed credit limit
+        if (newCredit > creditLimit) {
+          return {
+            success: false,
+            error: `Transaction would exceed member's credit limit of ₱${creditLimit.toFixed(2)}`
+          };
+        }
+      }
+    }
+    
     // Format transaction data
     const transactionData = {
       UserId: userId,
@@ -299,6 +318,18 @@ export async function CreateTransaction(
       if (product) {
         const newStockQuantity = product.Products.StockQuantity - item.Quantity;
         await ProductRepository.UpdateStock(item.ProductId, newStockQuantity);
+        
+        // Check if stock is low after this transaction
+        const STOCK_THRESHOLD = 10; // This should match the threshold in notifications.ts
+        if (newStockQuantity <= STOCK_THRESHOLD) {
+          // Import dynamically to avoid circular dependencies
+          const { SendLowStockNotification } = await import('@/lib/notifications');
+          await SendLowStockNotification(
+            item.ProductId,
+            product.Products.Name,
+            newStockQuantity
+          );
+        }
       }
     }
     
@@ -312,14 +343,40 @@ export async function CreateTransaction(
       }
     }
     
-    return { 
-      success: true, 
+    // Send purchase notification to admins
+    try {
+      if (memberId) {
+        const member = await MemberRepository.GetById(memberId);
+        if (member) {
+          await SendPurchaseNotification(
+            result.transaction.TransactionId,
+            member.Name,
+            totalAmount,
+            items.length
+          );
+        }
+      } else {
+        // For non-member purchases, still send notification with generic info
+        await SendPurchaseNotification(
+          result.transaction.TransactionId,
+          "Guest Customer",
+          totalAmount,
+          items.length
+        );
+      }
+    } catch (notifError) {
+      console.error("Error sending purchase notification:", notifError);
+      // Don't fail the transaction if notification fails
+    }
+
+    return {
+      success: true,
       transactionId: `TRX-${result.transaction.TransactionId}` 
     };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Error creating transaction:", error);
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred"
     };
   }

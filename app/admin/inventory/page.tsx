@@ -33,6 +33,9 @@ interface Product {
   id: number
   name: string
   price: number
+  basePrice: number
+  profitType: "percentage" | "fixed"
+  profitValue: number
   category: string
   image: string
   sku: string
@@ -72,6 +75,9 @@ export default function AdminInventoryPage() {
   const [newProduct, setNewProduct] = useState({
     name: "",
     price: "",
+    basePrice: "",
+    profitType: "percentage",
+    profitValue: "",
     category: "",
     sku: "",
     stock: "",
@@ -86,6 +92,9 @@ export default function AdminInventoryPage() {
   const [editedProduct, setEditedProduct] = useState({
     name: "",
     price: "",
+    basePrice: "",
+    profitType: "percentage",
+    profitValue: "",
     category: "",
     sku: "",
     stock: "",
@@ -122,6 +131,76 @@ export default function AdminInventoryPage() {
       });
     }
   };
+  
+  // Calculate price based on base price and profit settings
+  const calculatePrice = (basePrice: string, profitType: string, profitValue: string): number => {
+    const basePriceNum = parseFloat(basePrice);
+    const profitValueNum = parseFloat(profitValue);
+    
+    if (isNaN(basePriceNum) || isNaN(profitValueNum)) {
+      return 0;
+    }
+    
+    if (profitType === "percentage") {
+      return basePriceNum * (1 + profitValueNum / 100);
+    } else {
+      return basePriceNum + profitValueNum;
+    }
+  }
+  
+  // Handle profit type or value change to recalculate price for new product
+  const handleProfitChange = (type: string, value: string) => {
+    const newProfitType = type || newProduct.profitType;
+    const newProfitValue = value || newProduct.profitValue;
+    
+    const calculatedPrice = calculatePrice(newProduct.basePrice, newProfitType, newProfitValue);
+    
+    setNewProduct({
+      ...newProduct,
+      profitType: newProfitType as "percentage" | "fixed",
+      profitValue: newProfitValue,
+      price: calculatedPrice.toFixed(2)
+    });
+  }
+  
+  // Handle base price change to recalculate price for new product
+  const handleBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = e.target;
+    const calculatedPrice = calculatePrice(value, newProduct.profitType, newProduct.profitValue);
+    
+    setNewProduct({
+      ...newProduct,
+      basePrice: value,
+      price: calculatedPrice.toFixed(2)
+    });
+  }
+  
+  // Handle profit type or value change to recalculate price for edited product
+  const handleEditProfitChange = (type: string, value: string) => {
+    const newProfitType = type || editedProduct.profitType;
+    const newProfitValue = value || editedProduct.profitValue;
+    
+    const calculatedPrice = calculatePrice(editedProduct.basePrice, newProfitType, newProfitValue);
+    
+    setEditedProduct({
+      ...editedProduct,
+      profitType: newProfitType as "percentage" | "fixed",
+      profitValue: newProfitValue,
+      price: calculatedPrice.toFixed(2)
+    });
+  }
+  
+  // Handle base price change to recalculate price for edited product
+  const handleEditBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = e.target;
+    const calculatedPrice = calculatePrice(value, editedProduct.profitType, editedProduct.profitValue);
+    
+    setEditedProduct({
+      ...editedProduct,
+      basePrice: value,
+      price: calculatedPrice.toFixed(2)
+    });
+  }
   
   // Load products on component mount
   useEffect(() => {
@@ -188,18 +267,25 @@ export default function AdminInventoryPage() {
 
   // Handle edit product
   const handleEditProduct = (product: Product) => {
+    if (!product) {
+      console.error("handleEditProduct: product is null or undefined");
+      return;
+    }
     setSelectedProduct(product)
     setEditedProduct({
-      name: product.name,
-      price: product.price.toString(),
-      category: product.category,
-      sku: product.sku,
-      stock: product.stock.toString(),
-      description: product.description || "",
-      supplier: product.supplier || "",
-      image: product.image || "/placeholder.svg",
-      expiryDate: product.expiryDate || "",
-      isActive: product.isActive !== undefined ? product.isActive : true
+      name: product.name ?? "",
+      price: product.price != null ? product.price.toString() : "",
+      basePrice: product.basePrice != null ? product.basePrice.toString() : "",
+      profitType: product.profitType ?? "percentage",
+      profitValue: product.profitValue != null ? product.profitValue.toString() : "",
+      category: product.category ?? "",
+      sku: product.sku ?? "",
+      stock: product.stock != null ? product.stock.toString() : "",
+      description: product.description ?? "",
+      supplier: product.supplier ?? "",
+      image: product.image ?? "/placeholder.svg",
+      expiryDate: product.expiryDate ?? "",
+      isActive: product.isActive != null ? product.isActive : true
     })
     setIsEditProductModalOpen(true)
   }
@@ -230,15 +316,29 @@ export default function AdminInventoryPage() {
         return
       }
       
+      // Validate stock is not negative
+      const stockValue = parseInt(newProduct.stock) || 0
+      if (stockValue < 0) {
+        toast({
+          title: "Invalid Stock Value",
+          description: "Stock cannot be negative.",
+          variant: "destructive"
+        })
+        return
+      }
+      
       const response = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newProduct.name,
           price: parseFloat(newProduct.price),
+          basePrice: parseFloat(newProduct.basePrice),
+          profitType: newProduct.profitType,
+          profitValue: parseFloat(newProduct.profitValue),
           category: newProduct.category,
           sku: newProduct.sku,
-          stock: parseInt(newProduct.stock) || 0,
+          stock: stockValue,
           description: newProduct.description,
           supplier: newProduct.supplier,
           image: newProduct.image,
@@ -258,6 +358,9 @@ export default function AdminInventoryPage() {
         setNewProduct({
           name: "",
           price: "",
+          basePrice: "",
+          profitType: "percentage",
+          profitValue: "",
           category: "",
           sku: "",
           stock: "",
@@ -315,15 +418,29 @@ export default function AdminInventoryPage() {
         return
       }
       
+      // Validate stock is not negative
+      const stockValue = parseInt(editedProduct.stock) || 0
+      if (stockValue < 0) {
+        toast({
+          title: "Invalid Stock Value",
+          description: "Stock cannot be negative.",
+          variant: "destructive"
+        })
+        return
+      }
+      
       const response = await fetch(`/api/products/${selectedProduct.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: editedProduct.name,
           price: parseFloat(editedProduct.price),
+          basePrice: parseFloat(editedProduct.basePrice),
+          profitType: editedProduct.profitType,
+          profitValue: parseFloat(editedProduct.profitValue),
           category: editedProduct.category,
           sku: editedProduct.sku,
-          stock: parseInt(editedProduct.stock) || 0,
+          stock: stockValue,
           description: editedProduct.description,
           supplier: editedProduct.supplier,
           image: editedProduct.image,
@@ -424,6 +541,9 @@ export default function AdminInventoryPage() {
     setEditedProduct({
       name: product.name,
       price: product.price.toString(),
+      basePrice: product.basePrice.toString(),
+      profitType: product.profitType,
+      profitValue: product.profitValue.toString(),
       category: product.category,
       sku: product.sku,
       stock: product.stock.toString(),
@@ -695,7 +815,7 @@ export default function AdminInventoryPage() {
                               {product.category}
                             </Badge>
                           </td>
-                          <td className="px-4 py-3">₱{product.price.toFixed(2)}</td>
+                          <td className="px-4 py-3">₱{product.price != null ? product.price.toFixed(2) : '0.00'}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <span className={`inline-block h-2 w-2 rounded-full ${getStockStatus(product.stock).indicator}`} />
@@ -817,17 +937,63 @@ export default function AdminInventoryPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Price (₱)</label>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Base Price (₱)</label>
+              <Input 
+                type="number" 
+                placeholder="0.00" 
+                value={newProduct.basePrice}
+                onChange={handleBasePriceChange}
+                step="0.01"
+                min="0"
+              />
+              <p className="text-xs text-gray-500">The price at which the product was purchased from the supplier.</p>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Profit Margin</label>
+              <div className="flex gap-2">
+                <Select 
+                  value={newProduct.profitType} 
+                  onValueChange={(value) => handleProfitChange(value, newProduct.profitValue)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select profit type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">Percentage (%)</SelectItem>
+                    <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Input 
                   type="number" 
-                  placeholder="0.00" 
-                  value={newProduct.price}
-                  onChange={(e) => setNewProduct({...newProduct, price: e.target.value})}
+                  placeholder={newProduct.profitType === "percentage" ? "0%" : "₱0.00"} 
+                  value={newProduct.profitValue}
+                  onChange={(e) => handleProfitChange(newProduct.profitType, e.target.value)}
+                  step="0.01"
+                  min="0"
                 />
               </div>
+              <p className="text-xs text-gray-500">
+                {newProduct.profitType === "percentage" 
+                  ? "Percentage markup on the base price." 
+                  : "Fixed amount added to the base price."}
+              </p>
+            </div>
 
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Selling Price (₱)</label>
+              <Input 
+                type="number" 
+                placeholder="0.00" 
+                value={newProduct.price}
+                onChange={(e) => setNewProduct({...newProduct, price: e.target.value})}
+                readOnly
+              />
+              <p className="text-xs text-gray-500">Final selling price calculated from base price and profit margin.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <label className="text-sm font-medium">Initial Stock</label>
                 <Input 
@@ -837,21 +1003,21 @@ export default function AdminInventoryPage() {
                   onChange={(e) => setNewProduct({...newProduct, stock: e.target.value})}
                 />
               </div>
-            </div>
 
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">SKU/Barcode</label>
-              <div className="flex gap-2">
-                <Input 
-                  placeholder="Enter SKU or barcode number" 
-                  className="flex-1" 
-                  value={newProduct.sku}
-                  onChange={(e) => setNewProduct({...newProduct, sku: e.target.value})}
-                />
-                <Button variant="outline" className="flex items-center gap-2">
-                  <Barcode className="h-4 w-4" />
-                  Scan
-                </Button>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">SKU/Barcode</label>
+                <div className="flex gap-2">
+                  <Input 
+                    placeholder="Enter SKU or barcode number" 
+                    className="flex-1" 
+                    value={newProduct.sku}
+                    onChange={(e) => setNewProduct({...newProduct, sku: e.target.value})}
+                  />
+                  <Button variant="outline" className="flex items-center gap-2">
+                    <Barcode className="h-4 w-4" />
+                    Scan
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -950,26 +1116,62 @@ export default function AdminInventoryPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <label className="text-sm font-medium">Price (₱)</label>
-                  <Input 
-                    type="number" 
-                    placeholder="0.00" 
-                    value={editedProduct.price} 
-                    onChange={(e) => setEditedProduct({...editedProduct, price: e.target.value})}
-                  />
-                </div>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Base Price (₱)</label>
+                <Input 
+                  type="number" 
+                  placeholder="0.00" 
+                  value={editedProduct.basePrice} 
+                  onChange={handleEditBasePriceChange}
+                  step="0.01"
+                  min="0"
+                />
+                <p className="text-xs text-gray-500">The price at which the product was purchased from the supplier.</p>
+              </div>
 
-                <div className="grid gap-2">
-                  <label className="text-sm font-medium">Stock</label>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Profit Margin</label>
+                <div className="flex gap-2">
+                  <Select 
+                    value={editedProduct.profitType} 
+                    onValueChange={(value) => handleEditProfitChange(value, editedProduct.profitValue)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select profit type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="percentage">Percentage (%)</SelectItem>
+                      <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Input 
                     type="number" 
-                    placeholder="0" 
-                    value={editedProduct.stock} 
-                    onChange={(e) => setEditedProduct({...editedProduct, stock: e.target.value})}
+                    placeholder={editedProduct.profitType === "percentage" ? "0%" : "₱0.00"} 
+                    value={editedProduct.profitValue}
+                    onChange={(e) => handleEditProfitChange(editedProduct.profitType, e.target.value)}
+                    step="0.01"
+                    min="0"
                   />
                 </div>
+                <p className="text-xs text-gray-500">
+                  {editedProduct.profitType === "percentage" 
+                    ? "Percentage markup on the base price." 
+                    : "Fixed amount added to the base price."}
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Selling Price (₱)</label>
+                <Input 
+                  type="number" 
+                  placeholder="0.00" 
+                  value={editedProduct.price} 
+                  onChange={(e) => setEditedProduct({...editedProduct, price: e.target.value})}
+                  step="0.01"
+                  min="0"
+                  readOnly
+                />
+                <p className="text-xs text-gray-500">Final selling price calculated from base price and profit margin.</p>
               </div>
 
               <div className="grid gap-2">
@@ -980,6 +1182,33 @@ export default function AdminInventoryPage() {
                   onChange={(e) => setEditedProduct({...editedProduct, sku: e.target.value})}
                   disabled
                 />
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Stock</label>
+                <Input 
+                  type="number" 
+                  placeholder="0" 
+                  value={editedProduct.stock} 
+                  onChange={(e) => setEditedProduct({...editedProduct, stock: e.target.value})}
+                  min="0"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Product Status</label>
+                <Select 
+                  value={editedProduct.isActive ? "active" : "archived"} 
+                  onValueChange={(value) => setEditedProduct({...editedProduct, isActive: value === "active"})}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="archived">Archived</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="grid gap-2">
@@ -1000,22 +1229,6 @@ export default function AdminInventoryPage() {
                   onChange={(e) => setEditedProduct({...editedProduct, expiryDate: e.target.value})}
                 />
                 <p className="text-xs text-gray-500">Leave blank if product doesn't expire</p>
-              </div>
-
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Product Status</label>
-                <Select 
-                  value={editedProduct.isActive ? "active" : "archived"} 
-                  onValueChange={(value) => setEditedProduct({...editedProduct, isActive: value === "active"})}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="archived">Archived</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
 
               <div className="grid gap-2">
@@ -1067,7 +1280,7 @@ export default function AdminInventoryPage() {
               <div>
                 <h4 className="font-medium">{selectedProduct.name}</h4>
                 <p className="text-sm text-gray-600">
-                  {selectedProduct.category} - ₱{selectedProduct.price.toFixed(2)}
+                  {selectedProduct.category} - ₱{selectedProduct.price != null ? selectedProduct.price.toFixed(2) : '0.00'}
                 </p>
               </div>
             </div>
@@ -1114,8 +1327,22 @@ export default function AdminInventoryPage() {
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-sm font-medium text-gray-500">Price</p>
-                  <p className="text-lg font-semibold">₱{selectedProduct.price.toFixed(2)}</p>
+                  <p className="text-sm font-medium text-gray-500">Base Price</p>
+                  <p className="text-lg font-medium">₱{selectedProduct.basePrice != null ? selectedProduct.basePrice.toFixed(2) : '0.00'}</p>
+                </div>
+                
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Profit Margin</p>
+                  <p className="text-lg font-medium">
+                    {selectedProduct.profitType === "percentage" 
+                      ? `${selectedProduct.profitValue}%` 
+                      : `₱${selectedProduct.profitValue != null ? selectedProduct.profitValue.toFixed(2) : '0.00'}`}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Selling Price</p>
+                  <p className="text-lg font-semibold">₱{selectedProduct.price != null ? selectedProduct.price.toFixed(2) : '0.00'}</p>
                 </div>
                 
                 <div>
@@ -1188,7 +1415,7 @@ export default function AdminInventoryPage() {
               
               <DialogFooter>
                 <Button variant="outline" onClick={() => setSelectedProduct(null)}>Close</Button>
-                <Button onClick={() => handleEditProduct(selectedProduct)}>Edit Product</Button>
+                <Button onClick={() => selectedProduct && handleEditProduct(selectedProduct)}>Edit Product</Button>
               </DialogFooter>
             </div>
           )}

@@ -1,16 +1,20 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/connection';
 import { Products, Categories } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { ProductRepository } from '@/db/repositories/ProductRepository';
+import { SendLowStockNotification, SendExpiryWarningNotification } from '@/lib/notifications';
+
+interface RouteParams {
+  params: {
+    id: string;
+  };
+}
 
 /**
  * GET handler for retrieving a specific product by ID
  */
-export async function GET(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const productId = parseInt(params.id);
     
@@ -21,55 +25,35 @@ export async function GET(
       }, { status: 400 });
     }
     
-    // Get product and join with category
-    const productData = await db
-      .select()
-      .from(Products)
-      .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
-      .where(eq(Products.ProductId, productId))
-      .limit(1);
+    const product = await db.query.Products.findFirst({
+      where: eq(Products.ProductId, productId)
+    });
     
-    if (productData.length === 0) {
+    if (!product) {
       return NextResponse.json({
         status: 'error',
         message: 'Product not found'
       }, { status: 404 });
     }
     
-    const productItem = productData[0];
-    
-    // Format the response to match the frontend model
-    const formattedProduct = {
-      id: productItem.Products.ProductId,
-      name: productItem.Products.Name,
-      price: parseFloat(productItem.Products.Price),
-      category: productItem.Categories ? productItem.Categories.Name : 'uncategorized',
-      sku: productItem.Products.Sku,
-      stock: productItem.Products.StockQuantity,
-      description: productItem.Products.Description || '',
-      supplier: productItem.Products.Supplier || 'Unknown supplier',
-      image: productItem.Products.Image || '/placeholder.svg',
-      expiryDate: productItem.Products.ExpiryDate ? new Date(productItem.Products.ExpiryDate).toISOString() : null,
-      isActive: productItem.Products.IsActive,
-      lastRestocked: productItem.Products.UpdatedAt 
-        ? new Date(productItem.Products.UpdatedAt).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-          })
-        : new Date().toLocaleDateString('en-US', {
-            month: 'short', 
-            day: 'numeric',
-            year: 'numeric'
-          })
-    };
-    
     return NextResponse.json({
       status: 'success',
-      product: formattedProduct
+      product: {
+        id: product.ProductId,
+        name: product.Name,
+        description: product.Description,
+        sku: product.Sku,
+        price: parseFloat(String(product.Price)),
+        stock: product.StockQuantity,
+        categoryId: product.CategoryId,
+        image: product.Image,
+        supplier: product.Supplier,
+        expiryDate: product.ExpiryDate,
+        isActive: product.IsActive
+      }
     });
   } catch (error: any) {
-    console.error('Error retrieving product:', error);
+    console.error(`Error retrieving product:`, error);
     
     return NextResponse.json({
       status: 'error',
@@ -81,12 +65,10 @@ export async function GET(
 /**
  * PATCH handler for updating a specific product by ID
  */
-export async function PATCH(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const productId = parseInt(params.id);
+    const body = await request.json();
     
     if (isNaN(productId)) {
       return NextResponse.json({
@@ -95,88 +77,117 @@ export async function PATCH(
       }, { status: 400 });
     }
     
-    const body = await request.json();
+    // Get the current product
+    const currentProduct = await db.query.Products.findFirst({
+      where: eq(Products.ProductId, productId)
+    });
     
-    // Parse expiry date if provided
-    let expiryDate = undefined;
-    if (body.expiryDate !== undefined) {
-      if (body.expiryDate === null) {
-        expiryDate = null;
-      } else {
-        expiryDate = new Date(body.expiryDate);
-        if (isNaN(expiryDate.getTime())) {
-          return NextResponse.json({
-            status: 'error',
-            message: 'Invalid expiry date format'
-          }, { status: 400 });
-        }
-      }
-    }
-    
-    // Update the product
-    const updatedProduct = await db
-      .update(Products)
-      .set({
-        StockQuantity: body.stock !== undefined ? body.stock : undefined,
-        Price: body.price !== undefined ? body.price : undefined,
-        Name: body.name || undefined,
-        Description: body.description || undefined,
-        Image: body.image || undefined,
-        Supplier: body.supplier || undefined,
-        ExpiryDate: expiryDate,
-        IsActive: body.isActive !== undefined ? body.isActive : undefined,
-        UpdatedAt: new Date()
-      })
-      .where(eq(Products.ProductId, productId))
-      .returning();
-    
-    if (updatedProduct.length === 0) {
+    if (!currentProduct) {
       return NextResponse.json({
         status: 'error',
         message: 'Product not found'
       }, { status: 404 });
     }
     
-    // Get the category name
-    const category = await db
-      .select()
-      .from(Categories)
-      .where(eq(Categories.CategoryId, updatedProduct[0].CategoryId))
-      .limit(1);
+    // Prevent negative stock
+    if (body.stock !== undefined && body.stock < 0) {
+      return NextResponse.json({
+        status: 'error',
+        message: 'Stock quantity cannot be negative'
+      }, { status: 400 });
+    }
     
-    // Format the response to match the frontend model
-    const formattedProduct = {
-      id: updatedProduct[0].ProductId,
-      name: updatedProduct[0].Name,
-      price: parseFloat(updatedProduct[0].Price),
-      category: category.length > 0 ? category[0].Name : 'uncategorized',
-      sku: updatedProduct[0].Sku,
-      stock: updatedProduct[0].StockQuantity,
-      description: updatedProduct[0].Description || '',
-      supplier: updatedProduct[0].Supplier || 'Unknown supplier',
-      image: updatedProduct[0].Image || '/placeholder.svg',
-      expiryDate: updatedProduct[0].ExpiryDate ? new Date(updatedProduct[0].ExpiryDate).toISOString() : null,
-      isActive: updatedProduct[0].IsActive,
-      lastRestocked: updatedProduct[0].UpdatedAt 
-        ? new Date(updatedProduct[0].UpdatedAt).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-          })
-        : new Date().toLocaleDateString('en-US', {
-            month: 'short', 
-            day: 'numeric',
-            year: 'numeric'
-          })
-    };
+    // Prepare update object
+    const updateData: Partial<typeof Products.$inferInsert> = {};
+    
+    // Only include fields that are provided in the request
+    if (body.name !== undefined) updateData.Name = body.name;
+    if (body.description !== undefined) updateData.Description = body.description;
+    if (body.price !== undefined) updateData.Price = body.price;
+    if (body.stock !== undefined) updateData.StockQuantity = body.stock;
+    if (body.categoryId !== undefined) updateData.CategoryId = body.categoryId;
+    if (body.image !== undefined) updateData.Image = body.image;
+    if (body.supplier !== undefined) updateData.Supplier = body.supplier;
+    if (body.isActive !== undefined) updateData.IsActive = body.isActive;
+    
+    // Handle expiry date
+    if (body.expiryDate !== undefined) {
+      updateData.ExpiryDate = body.expiryDate ? new Date(body.expiryDate) : null;
+    }
+    
+    // Update the product
+    const updatedProduct = await db
+      .update(Products)
+      .set({
+        ...updateData,
+        UpdatedAt: new Date()
+      })
+      .where(eq(Products.ProductId, productId))
+      .returning();
+    
+    if (!updatedProduct.length) {
+      throw new Error('Failed to update product');
+    }
+    
+    const product = updatedProduct[0];
+    
+    // Check if stock is low (less than or equal to 10) and send notification
+    if (
+      body.stock !== undefined && 
+      body.stock <= 10 && 
+      (currentProduct.StockQuantity === null || currentProduct.StockQuantity > 10)
+    ) {
+      try {
+        await SendLowStockNotification(
+          product.ProductId,
+          product.Name,
+          product.StockQuantity
+        );
+      } catch (notifError) {
+        console.error('Error sending low stock notification:', notifError);
+      }
+    }
+    
+    // Check if expiry date is within 30 days
+    if (
+      product.ExpiryDate && 
+      body.expiryDate !== undefined
+    ) {
+      const expiryDate = new Date(product.ExpiryDate);
+      const daysUntilExpiry = Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      
+      if (daysUntilExpiry <= 30 && daysUntilExpiry > 0) {
+        try {
+          await SendExpiryWarningNotification(
+            product.ProductId,
+            product.Name,
+            expiryDate
+          );
+        } catch (notifError) {
+          console.error('Error sending expiry warning notification:', notifError);
+        }
+      }
+    }
     
     return NextResponse.json({
       status: 'success',
       message: 'Product updated successfully',
-      product: formattedProduct
+      product: {
+        id: product.ProductId,
+        name: product.Name,
+        description: product.Description,
+        sku: product.Sku,
+        price: parseFloat(String(product.Price)),
+        stock: product.StockQuantity,
+        categoryId: product.CategoryId,
+        image: product.Image,
+        supplier: product.Supplier,
+        expiryDate: product.ExpiryDate,
+        isActive: product.IsActive
+      }
     });
   } catch (error: any) {
-    console.error('Error updating product:', error);
+    console.error(`Error updating product:`, error);
     
     return NextResponse.json({
       status: 'error',
@@ -188,10 +199,7 @@ export async function PATCH(
 /**
  * DELETE handler for archiving a product (not actually deleting)
  */
-export async function DELETE(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const productId = parseInt(params.id);
     
@@ -202,10 +210,17 @@ export async function DELETE(
       }, { status: 400 });
     }
     
-    // Archive the product instead of deleting it
-    const archivedProduct = await ProductRepository.Archive(productId);
+    // Soft delete by setting isActive to false
+    const deactivatedProduct = await db
+      .update(Products)
+      .set({
+        IsActive: false,
+        UpdatedAt: new Date()
+      })
+      .where(eq(Products.ProductId, productId))
+      .returning();
     
-    if (!archivedProduct) {
+    if (!deactivatedProduct.length) {
       return NextResponse.json({
         status: 'error',
         message: 'Product not found'
@@ -214,18 +229,14 @@ export async function DELETE(
     
     return NextResponse.json({
       status: 'success',
-      message: 'Product archived successfully',
-      product: {
-        id: archivedProduct.ProductId,
-        isActive: archivedProduct.IsActive
-      }
+      message: 'Product deactivated successfully'
     });
   } catch (error: any) {
-    console.error('Error archiving product:', error);
+    console.error(`Error deactivating product:`, error);
     
     return NextResponse.json({
       status: 'error',
-      message: `Error archiving product: ${error.message || 'Unknown error'}`
+      message: `Error deactivating product: ${error.message || 'Unknown error'}`
     }, { status: 500 });
   }
 }
@@ -235,10 +246,11 @@ export async function DELETE(
  */
 export async function PUT(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const productId = parseInt(params.id);
+    const { id } = await params;
+    const productId = parseInt(id);
     
     if (isNaN(productId)) {
       return NextResponse.json({

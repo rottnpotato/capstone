@@ -75,6 +75,7 @@ export class MemberRepository {
     Phone?: string;
     Address?: string;
     CreditBalance?: string;
+    CreditLimit?: string;
     UserId?: number;
   }) {
     try {
@@ -98,6 +99,7 @@ export class MemberRepository {
     Phone: string;
     Address: string;
     CreditBalance: string;
+    CreditLimit: string;
     UserId: number;
   }>) {
     try {

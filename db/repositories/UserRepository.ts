@@ -18,6 +18,7 @@ export class UserRepository {
     Phone?: string;
     Address?: string;
     InitialCredit?: number;
+    CreditLimit?: number;
   }) {
     try {
       // Check if user with email already exists
@@ -70,6 +71,7 @@ export class UserRepository {
                 Phone: userData.Phone,
                 Address: userData.Address,
                 CreditBalance: userData.InitialCredit ? userData.InitialCredit.toString() : '0',
+                CreditLimit: userData.CreditLimit ? userData.CreditLimit.toString() : '0',
                 UserId: user.UserId,
               });
           }

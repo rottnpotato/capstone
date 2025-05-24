@@ -5,7 +5,7 @@ import { motion } from "framer-motion"
 import { Navbar } from "@/components/ui/navbar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Search, Plus, ArrowUpDown, MoreHorizontal, Edit, Trash2, CreditCard, Mail, Loader2, BadgeInfo } from "lucide-react"
+import { Search, Plus, ArrowUpDown, MoreHorizontal, Edit, Trash2, CreditCard, Mail, Loader2, BadgeInfo, Receipt, CheckCircle2, AlertCircle } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
@@ -45,6 +45,7 @@ import {
 
 // Use the interface from the API route
 import type { MemberForAdminPage } from "@/app/api/members/route";
+import { IssueAccountVerification, AddMember, UpdateMember, DeleteMember } from "./actions";
 
 // Debounce function
 function debounce<T extends (...args: any[]) => void>(func: T, wait: number): (...args: Parameters<T>) => void {
@@ -69,6 +70,7 @@ const addMemberFormSchema = z.object({
   address: z.string().optional(),
   userId: z.string().optional(),
   initialCredit: z.coerce.number().nonnegative().default(0),
+  creditLimit: z.coerce.number().nonnegative().default(0),
 });
 
 type Role = {
@@ -84,6 +86,94 @@ type User = {
   roleId: number;
   roleName: string;
 };
+
+// Purchase History Component
+function PurchaseHistory({ memberId }: { memberId: string }) {
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchPurchaseHistory = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(`/api/members/${memberId}/transactions`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.message || "Failed to fetch purchase history");
+        }
+        
+        setTransactions(data.transactions || []);
+      } catch (err: any) {
+        console.error("Fetch purchase history error:", err);
+        setError(err.message || "An error occurred while fetching purchase history.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    if (memberId) {
+      fetchPurchaseHistory();
+    }
+  }, [memberId]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center">
+          <Receipt className="mr-2 h-4 w-4" /> Purchase History
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading && (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="h-6 w-6 animate-spin text-amber-500 mr-2" />
+            <p>Loading purchase history...</p>
+          </div>
+        )}
+        
+        {error && !isLoading && (
+          <div className="text-red-500 py-2">
+            Error: {error}
+          </div>
+        )}
+        
+        {!isLoading && !error && transactions.length === 0 && (
+          <p className="text-gray-500 py-2">No purchase history found for this member.</p>
+        )}
+        
+        {!isLoading && !error && transactions.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2 font-medium text-gray-600">Date</th>
+                  <th className="text-left py-2 font-medium text-gray-600">Time</th>
+                  <th className="text-left py-2 font-medium text-gray-600">Amount</th>
+                  <th className="text-left py-2 font-medium text-gray-600">Payment</th>
+                  <th className="text-left py-2 font-medium text-gray-600">Cashier</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((transaction) => (
+                  <tr key={transaction.id} className="border-b hover:bg-gray-50">
+                    <td className="py-2">{transaction.date}</td>
+                    <td className="py-2">{transaction.time}</td>
+                    <td className="py-2">{transaction.totalAmount.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })}</td>
+                    <td className="py-2 capitalize">{transaction.paymentMethod}</td>
+                    <td className="py-2">{transaction.cashierName}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function AdminMembersPage() {
   // State for data, loading, errors, filters, sorting, pagination
@@ -107,6 +197,8 @@ export default function AdminMembersPage() {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isViewMemberModalOpen, setIsViewMemberModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [issuingAccount, setIssuingAccount] = useState<string | null>(null);
+  const [accountIssueMessage, setAccountIssueMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   // Setup form
   const addMemberForm = useForm<z.infer<typeof addMemberFormSchema>>({
@@ -118,6 +210,7 @@ export default function AdminMembersPage() {
       address: "",
       userId: "",
       initialCredit: 0,
+      creditLimit: 0,
     },
   });
 
@@ -131,6 +224,7 @@ export default function AdminMembersPage() {
       address: "",
       userId: "",
       initialCredit: 0,
+      creditLimit: 0,
     },
   });
 
@@ -219,6 +313,7 @@ export default function AdminMembersPage() {
         address: selectedMember.address || "",
         userId: selectedMember.userId ? selectedMember.userId.toString() : "",
         initialCredit: selectedMember.currentCredit,
+        creditLimit: selectedMember.creditLimit,
       });
     }
   }, [selectedMember, isEditMemberModalOpen, editMemberForm]);
@@ -230,27 +325,21 @@ export default function AdminMembersPage() {
     setIsSubmitting(true);
     try {
       // Convert userId from string to number or null
-      const memberData = {
+      const userId = values.userId && values.userId !== "0" ? parseInt(values.userId) : null;
+      
+      // Use the server action instead of fetch
+      const result = await UpdateMember(selectedMember.id, {
         name: values.name,
         email: values.email,
         phone: values.phone,
         address: values.address,
-        userId: values.userId && values.userId !== "0" ? parseInt(values.userId) : null,
+        userId: userId,
         creditBalance: values.initialCredit,
-      };
-      
-      const response = await fetch(`/api/members/${selectedMember.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(memberData),
+        creditLimit: values.creditLimit,
       });
       
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to update member");
+      if (!result.success) {
+        throw new Error(result.message || "Failed to update member");
       }
       
       // Refetch members to show updated data
@@ -318,14 +407,11 @@ export default function AdminMembersPage() {
     if (!selectedMember) return;
     setIsSubmitting(true);
     try {
-      const response = await fetch(`/api/members/${selectedMember.id}`, {
-        method: 'DELETE',
-      });
+      // Use the server action instead of fetch
+      const result = await DeleteMember(selectedMember.id);
       
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to delete member");
+      if (!result.success) {
+        throw new Error(result.message || "Failed to delete member");
       }
       
       // Refetch members to update the list
@@ -357,23 +443,21 @@ export default function AdminMembersPage() {
     setIsSubmitting(true);
     try {
       // Convert userId from string to number or null
-      const memberData = {
-        ...values,
-        userId: values.userId && values.userId !== "0" ? parseInt(values.userId) : null,
-      };
+      const userId = values.userId && values.userId !== "0" ? parseInt(values.userId) : null;
       
-      const response = await fetch('/api/members', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(memberData),
+      // Use the server action instead of fetch
+      const result = await AddMember({
+        name: values.name,
+        email: values.email,
+        phone: values.phone,
+        address: values.address,
+        userId: userId,
+        initialCredit: values.initialCredit,
+        creditLimit: values.creditLimit,
       });
       
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to add member");
+      if (!result.success) {
+        throw new Error(result.message || "Failed to add member");
       }
       
       // Refetch members to show the new addition
@@ -394,6 +478,45 @@ export default function AdminMembersPage() {
     }
   };
 
+  const handleIssueAccount = async (member: MemberForAdminPage) => {
+    if (member.userId) {
+      setAccountIssueMessage({
+        type: 'error',
+        text: 'This member already has an account'
+      });
+      return;
+    }
+
+    try {
+      setIssuingAccount(member.id);
+      const result = await IssueAccountVerification(member.id);
+      
+      if (result.success) {
+        setAccountIssueMessage({
+          type: 'success',
+          text: result.message
+        });
+      } else {
+        setAccountIssueMessage({
+          type: 'error',
+          text: result.message
+        });
+      }
+    } catch (error) {
+      console.error("Error issuing account:", error);
+      setAccountIssueMessage({
+        type: 'error',
+        text: 'Failed to issue account verification'
+      });
+    } finally {
+      setIssuingAccount(null);
+      // Clear message after 5 seconds
+      setTimeout(() => {
+        setAccountIssueMessage(null);
+      }, 5000);
+    }
+  };
+
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
@@ -410,19 +533,11 @@ export default function AdminMembersPage() {
             </div>
             <Button
               className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
-              onClick={() => window.location.href = '/admin/accounts'}
+              onClick={() => setIsAddMemberModalOpen(true)}
             >
               <Plus className="h-4 w-4 mr-2" /> Add Member
             </Button>
           </div>
-
-          {/* Notification about merged functionality */}
-          <Alert className="mb-8 border-amber-200 bg-amber-50">
-            <AlertDescription className="flex items-center text-amber-800">
-              <BadgeInfo className="h-4 w-4 mr-2" />
-              The "Add Member" functionality has been moved to the Accounts page. You can now create a member and their associated user account in one step.
-            </AlertDescription>
-          </Alert>
 
           {/* Filters */}
           <Card className="mb-8">
@@ -541,18 +656,41 @@ export default function AdminMembersPage() {
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
                                     <DropdownMenuItem onClick={() => handleViewMember(member)}>
-                                      <CreditCard className="mr-2 h-4 w-4" /> View Details
+                                      <BadgeInfo className="mr-2 h-4 w-4" />
+                                      View Details
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => handleEditMember(member)}>
-                                      <Edit className="mr-2 h-4 w-4" /> Edit
+                                      <Edit className="mr-2 h-4 w-4" />
+                                      Edit
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem> {/* Add email functionality later */}
-                                      <Mail className="mr-2 h-4 w-4" /> Send Email
+                                    <DropdownMenuItem onClick={() => handleDeleteMember(member)}>
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Delete
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
-                                    <DropdownMenuItem className="text-red-600" onClick={() => handleDeleteMember(member)}>
-                                      <Trash2 className="mr-2 h-4 w-4" /> Delete
-                                    </DropdownMenuItem>
+                                    {!member.userId ? (
+                                      <DropdownMenuItem 
+                                        onClick={() => handleIssueAccount(member)}
+                                        disabled={issuingAccount === member.id}
+                                      >
+                                        {issuingAccount === member.id ? (
+                                          <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Sending Email...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Mail className="mr-2 h-4 w-4" />
+                                            Issue Account
+                                          </>
+                                        )}
+                                      </DropdownMenuItem>
+                                    ) : (
+                                      <DropdownMenuItem disabled>
+                                        <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
+                                        Account Created
+                                      </DropdownMenuItem>
+                                    )}
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               </td>
@@ -662,6 +800,22 @@ export default function AdminMembersPage() {
               </div>
               <FormField
                 control={addMemberForm.control}
+                name="creditLimit"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Credit Limit</FormLabel>
+                    <FormControl>
+                      <Input placeholder="0.00" type="number" min="0" step="0.01" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Maximum amount of credit this member can use for purchases
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={addMemberForm.control}
                 name="address"
                 render={({ field }) => (
                   <FormItem>
@@ -741,7 +895,7 @@ export default function AdminMembersPage() {
 
       {/* Edit Member Modal */}
       <Dialog open={isEditMemberModalOpen} onOpenChange={setIsEditMemberModalOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-screen overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Member: {selectedMember?.name}</DialogTitle>
             <DialogDescription>Update the details for this member.</DialogDescription>
@@ -802,6 +956,22 @@ export default function AdminMembersPage() {
                   )}
                 />
               </div>
+              <FormField
+                control={editMemberForm.control}
+                name="creditLimit"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Credit Limit</FormLabel>
+                    <FormControl>
+                      <Input placeholder="0.00" type="number" min="0" step="0.01" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Maximum amount of credit this member can use for purchases
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={editMemberForm.control}
                 name="address"
@@ -874,7 +1044,7 @@ export default function AdminMembersPage() {
 
       {/* View Member Modal */}
       <Dialog open={isViewMemberModalOpen} onOpenChange={setIsViewMemberModalOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-screen max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Member Details: {selectedMember?.name}</DialogTitle>
           </DialogHeader>
@@ -884,18 +1054,12 @@ export default function AdminMembersPage() {
               <p><strong>Email:</strong> {selectedMember.email}</p>
               <p><strong>Phone:</strong> {selectedMember.phone}</p>
               <p><strong>Join Date:</strong> {selectedMember.joinDate}</p>
-              <p><strong>Status:</strong> <Badge variant={selectedMember.status === 'active' ? 'default' : 'secondary'} className="capitalize">{selectedMember.status}</Badge></p>
+              <div><strong>Status:</strong> <Badge variant={selectedMember.status === 'active' ? 'default' : 'secondary'} className="capitalize">{selectedMember.status}</Badge></div>
               <p><strong>Credit Balance:</strong> {selectedMember.currentCredit.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })}</p>
               <p><strong>Credit Limit:</strong> {selectedMember.creditLimit.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })}</p>
               <p><strong>Role:</strong> {selectedMember.roleName || 'No Role Assigned'}</p>
               
-              <Card>
-                <CardHeader><CardTitle>Purchase History</CardTitle></CardHeader>
-                <CardContent>
-                  {/* TODO: Fetch and display actual purchase history */} 
-                  <p className="text-gray-500">Purchase history loading...</p>
-                </CardContent>
-              </Card>
+              <PurchaseHistory memberId={selectedMember.id} />
             </div>
           )}
           <DialogFooter className="mt-6">
@@ -920,6 +1084,29 @@ export default function AdminMembersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Account Issue Notification */}
+      {accountIssueMessage && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          className={`mb-4 p-4 rounded-md ${
+            accountIssueMessage.type === 'success' 
+              ? 'bg-green-50 border border-green-200 text-green-800' 
+              : 'bg-red-50 border border-red-200 text-red-800'
+          }`}
+        >
+          <div className="flex items-center">
+            {accountIssueMessage.type === 'success' ? (
+              <CheckCircle2 className="h-5 w-5 mr-2 text-green-500" />
+            ) : (
+              <AlertCircle className="h-5 w-5 mr-2 text-red-500" />
+            )}
+            <p>{accountIssueMessage.text}</p>
+          </div>
+        </motion.div>
+      )}
 
     </div>
   )

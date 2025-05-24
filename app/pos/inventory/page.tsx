@@ -35,6 +35,9 @@ interface Product {
   id: string
   name: string
   price: number
+  basePrice: number
+  profitType: "percentage" | "fixed"
+  profitValue: number
   category: string
   image: string
   stock: number
@@ -148,6 +151,9 @@ export default function InventoryPage() {
     name: "",
     category: "",
     price: "",
+    basePrice: "",
+    profitType: "percentage",
+    profitValue: "",
     stock: "",
     supplier: "",
     description: "",
@@ -161,6 +167,9 @@ export default function InventoryPage() {
     name: "",
     category: "",
     price: "",
+    basePrice: "",
+    profitType: "percentage",
+    profitValue: "",
     stock: "",
     supplier: "",
     description: "",
@@ -179,6 +188,8 @@ export default function InventoryPage() {
     name: "",
     category: "",
     price: "",
+    basePrice: "",
+    profitValue: "",
     stock: "",
     image: "",
     sku: "",
@@ -190,6 +201,8 @@ export default function InventoryPage() {
     name: "",
     category: "",
     price: "",
+    basePrice: "",
+    profitValue: "",
     stock: "",
     sku: "",
     expiryDate: ""
@@ -201,6 +214,9 @@ export default function InventoryPage() {
       id: "1",
       name: "Organic Rice",
       price: 75.5,
+      basePrice: 60.0,
+      profitType: "percentage",
+      profitValue: 25,
       category: "grocery",
       image: "https://images.unsplash.com/photo-1586201375761-83865001e31c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=300&q=80",
       stock: 50,
@@ -256,6 +272,9 @@ export default function InventoryPage() {
               id: (product.ProductId || product.id || '').toString(),
               name: product.Name || product.name || 'Unnamed Product',
               price: parseFloat(product.Price || product.price || 0),
+              basePrice: parseFloat(product.BasePrice || product.basePrice || 0),
+              profitType: product.ProfitType || product.profitType || 'percentage',
+              profitValue: parseFloat(product.ProfitValue || product.profitValue || 0),
               category: category,
               image: product.Image || product.image || '/placeholder.svg',
               stock: parseInt(product.StockQuantity || product.stock || 0),
@@ -417,6 +436,63 @@ export default function InventoryPage() {
     })
   }
   
+  // Calculate price based on base price and profit settings
+  const calculatePrice = (basePrice: string, profitType: string, profitValue: string): number => {
+    const basePriceNum = parseFloat(basePrice);
+    const profitValueNum = parseFloat(profitValue);
+    
+    if (isNaN(basePriceNum) || isNaN(profitValueNum)) {
+      return 0;
+    }
+    
+    if (profitType === "percentage") {
+      return basePriceNum * (1 + profitValueNum / 100);
+    } else {
+      return basePriceNum + profitValueNum;
+    }
+  }
+  
+  // Handle profit type or value change to recalculate price
+  const handleProfitChange = (type: string, value: string) => {
+    const newProfitType = type || newProduct.profitType;
+    const newProfitValue = value || newProduct.profitValue;
+    
+    const calculatedPrice = calculatePrice(newProduct.basePrice, newProfitType, newProfitValue);
+    
+    setNewProduct({
+      ...newProduct,
+      profitType: newProfitType as "percentage" | "fixed",
+      profitValue: newProfitValue,
+      price: calculatedPrice.toFixed(2)
+    });
+    
+    // Clear error when field is updated
+    if (value) {
+      setErrors({
+        ...errors,
+        profitValue: ""
+      });
+    }
+  }
+  
+  // Handle base price change to recalculate price
+  const handleBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = e.target;
+    const calculatedPrice = calculatePrice(value, newProduct.profitType, newProduct.profitValue);
+    
+    setNewProduct({
+      ...newProduct,
+      basePrice: value,
+      price: calculatedPrice.toFixed(2)
+    });
+    
+    // Clear error when field is updated
+    setErrors({
+      ...errors,
+      basePrice: ""
+    });
+  }
+  
   // Handle image upload
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -454,6 +530,9 @@ export default function InventoryPage() {
       name: product.name,
       category: product.category,
       price: product.price.toString(),
+      basePrice: product.basePrice.toString(),
+      profitType: product.profitType,
+      profitValue: product.profitValue.toString(),
       stock: product.stock.toString(),
       supplier: product.supplier || "",
       description: product.description || "",
@@ -467,6 +546,8 @@ export default function InventoryPage() {
       name: "",
       category: "",
       price: "",
+      basePrice: "",
+      profitValue: "",
       stock: "",
       sku: "",
       expiryDate: ""
@@ -505,12 +586,55 @@ export default function InventoryPage() {
     })
   }
   
+  // Handle edit profit type or value change to recalculate price
+  const handleEditProfitChange = (type: string, value: string) => {
+    const newProfitType = type || editProduct.profitType;
+    const newProfitValue = value || editProduct.profitValue;
+    
+    const calculatedPrice = calculatePrice(editProduct.basePrice, newProfitType, newProfitValue);
+    
+    setEditProduct({
+      ...editProduct,
+      profitType: newProfitType as "percentage" | "fixed",
+      profitValue: newProfitValue,
+      price: calculatedPrice.toFixed(2)
+    });
+    
+    // Clear error when field is updated
+    if (value) {
+      setEditErrors({
+        ...editErrors,
+        profitValue: ""
+      });
+    }
+  }
+  
+  // Handle edit base price change to recalculate price
+  const handleEditBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = e.target;
+    const calculatedPrice = calculatePrice(value, editProduct.profitType, editProduct.profitValue);
+    
+    setEditProduct({
+      ...editProduct,
+      basePrice: value,
+      price: calculatedPrice.toFixed(2)
+    });
+    
+    // Clear error when field is updated
+    setEditErrors({
+      ...editErrors,
+      basePrice: ""
+    });
+  }
+  
   // Validate edit form
   const validateEditForm = (): boolean => {
     const newErrors = {
       name: "",
       category: "",
       price: "",
+      basePrice: "",
+      profitValue: "",
       stock: "",
       sku: "",
       expiryDate: ""
@@ -528,14 +652,40 @@ export default function InventoryPage() {
       isValid = false
     }
     
+    if (!editProduct.basePrice || parseFloat(editProduct.basePrice) < 0) {
+      newErrors.basePrice = "Valid base price is required"
+      isValid = false
+    }
+    
+    if (editProduct.profitType === "percentage") {
+      if (!editProduct.profitValue || parseFloat(editProduct.profitValue) < 0) {
+        newErrors.profitValue = "Valid profit percentage is required"
+        isValid = false
+      }
+    } else {
+      if (!editProduct.profitValue || parseFloat(editProduct.profitValue) < 0) {
+        newErrors.profitValue = "Valid profit amount is required"
+        isValid = false
+      }
+    }
+    
     if (!editProduct.price || parseFloat(editProduct.price) <= 0) {
       newErrors.price = "Valid price is required"
       isValid = false
     }
     
-    if (!editProduct.stock || parseInt(editProduct.stock) < 0) {
-      newErrors.stock = "Valid stock quantity is required"
+    if (!editProduct.stock) {
+      newErrors.stock = "Stock quantity is required"
       isValid = false
+    } else {
+      const stockValue = parseInt(editProduct.stock)
+      if (isNaN(stockValue)) {
+        newErrors.stock = "Stock must be a valid number"
+        isValid = false
+      } else if (stockValue < 0) {
+        newErrors.stock = "Stock cannot be negative"
+        isValid = false
+      }
     }
     
     if (!editProduct.sku.trim()) {
@@ -567,6 +717,9 @@ export default function InventoryPage() {
     const productData: any = {
       name: editProduct.name,
       price: parseFloat(editProduct.price),
+      basePrice: parseFloat(editProduct.basePrice),
+      profitType: editProduct.profitType as "percentage" | "fixed",
+      profitValue: parseFloat(editProduct.profitValue),
       category: editProduct.category,
       stock: parseInt(editProduct.stock),
       description: editProduct.description,
@@ -605,6 +758,9 @@ export default function InventoryPage() {
             ...product,
             name: editProduct.name,
             price: parseFloat(editProduct.price),
+            basePrice: parseFloat(editProduct.basePrice),
+            profitType: editProduct.profitType as "percentage" | "fixed",
+            profitValue: parseFloat(editProduct.profitValue),
             category: editProduct.category,
             stock: parseInt(editProduct.stock),
             description: editProduct.description,
@@ -627,6 +783,9 @@ export default function InventoryPage() {
           ...selectedProduct,
           name: editProduct.name,
           price: parseFloat(editProduct.price),
+          basePrice: parseFloat(editProduct.basePrice),
+          profitType: editProduct.profitType as "percentage" | "fixed",
+          profitValue: parseFloat(editProduct.profitValue),
           category: editProduct.category,
           stock: parseInt(editProduct.stock),
           description: editProduct.description,
@@ -670,6 +829,9 @@ export default function InventoryPage() {
       name: "",
       category: "",
       price: "",
+      basePrice: "",
+      profitType: "percentage",
+      profitValue: "",
       stock: "",
       supplier: "",
       description: "",
@@ -681,6 +843,8 @@ export default function InventoryPage() {
       name: "",
       category: "",
       price: "",
+      basePrice: "",
+      profitValue: "",
       stock: "",
       image: "",
       sku: "",
@@ -709,6 +873,8 @@ export default function InventoryPage() {
       name: "",
       category: "",
       price: "",
+      basePrice: "",
+      profitValue: "",
       stock: "",
       image: "",
       sku: "",
@@ -727,14 +893,40 @@ export default function InventoryPage() {
       isValid = false
     }
     
+    if (!newProduct.basePrice || parseFloat(newProduct.basePrice) < 0) {
+      newErrors.basePrice = "Valid base price is required"
+      isValid = false
+    }
+    
+    if (newProduct.profitType === "percentage") {
+      if (!newProduct.profitValue || parseFloat(newProduct.profitValue) < 0) {
+        newErrors.profitValue = "Valid profit percentage is required"
+        isValid = false
+      }
+    } else {
+      if (!newProduct.profitValue || parseFloat(newProduct.profitValue) < 0) {
+        newErrors.profitValue = "Valid profit amount is required"
+        isValid = false
+      }
+    }
+    
     if (!newProduct.price || parseFloat(newProduct.price) <= 0) {
       newErrors.price = "Valid price is required"
       isValid = false
     }
     
-    if (!newProduct.stock || parseInt(newProduct.stock) < 0) {
-      newErrors.stock = "Valid stock quantity is required"
+    if (!newProduct.stock) {
+      newErrors.stock = "Stock quantity is required"
       isValid = false
+    } else {
+      const stockValue = parseInt(newProduct.stock)
+      if (isNaN(stockValue)) {
+        newErrors.stock = "Stock must be a valid number"
+        isValid = false
+      } else if (stockValue < 0) {
+        newErrors.stock = "Stock cannot be negative"
+        isValid = false
+      }
     }
     
     if (!newProduct.sku.trim()) {
@@ -768,6 +960,9 @@ export default function InventoryPage() {
     const productData: any = {
       name: newProduct.name,
       price: parseFloat(newProduct.price),
+      basePrice: parseFloat(newProduct.basePrice),
+      profitType: newProduct.profitType as "percentage" | "fixed",
+      profitValue: parseFloat(newProduct.profitValue),
       category: newProduct.category,
       stock: parseInt(newProduct.stock),
       description: newProduct.description,
@@ -803,6 +998,9 @@ export default function InventoryPage() {
         id: data.product.id || `${products.length + 1}`,
         name: newProduct.name,
         price: parseFloat(newProduct.price),
+        basePrice: parseFloat(newProduct.basePrice),
+        profitType: newProduct.profitType as "percentage" | "fixed",
+        profitValue: parseFloat(newProduct.profitValue),
         category: newProduct.category,
         image: newProductImage || "",
         stock: parseInt(newProduct.stock),
@@ -859,8 +1057,14 @@ export default function InventoryPage() {
     }
     
     const stockValue = parseInt(updatedStock)
-    if (isNaN(stockValue) || stockValue < 0) {
-      setStockUpdateError("Stock must be a valid positive number")
+    if (isNaN(stockValue)) {
+      setStockUpdateError("Stock must be a valid number")
+      return false
+    }
+    
+    // Prevent negative stock values
+    if (stockValue < 0) {
+      setStockUpdateError("Stock cannot be negative")
       return false
     }
     
@@ -1375,7 +1579,21 @@ export default function InventoryPage() {
 
                       <div className="grid grid-cols-2 gap-4 mt-2">
                         <div>
-                          <p className="text-sm text-gray-500">Price</p>
+                          <p className="text-sm text-gray-500">Base Price</p>
+                          <p className="font-medium">₱{selectedProduct.basePrice.toFixed(2)}</p>
+                        </div>
+
+                        <div>
+                          <p className="text-sm text-gray-500">Profit Margin</p>
+                          <p className="font-medium">
+                            {selectedProduct.profitType === "percentage" 
+                              ? `${selectedProduct.profitValue}%` 
+                              : `₱${selectedProduct.profitValue.toFixed(2)}`}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-sm text-gray-500">Selling Price</p>
                           <p className="font-bold text-amber-600">₱{selectedProduct.price.toFixed(2)}</p>
                         </div>
 
@@ -1412,24 +1630,22 @@ export default function InventoryPage() {
                           </p>
                         </div>
 
-                        {selectedProduct.expiryDate && (
-                          <div>
-                            <p className="text-sm text-gray-500">Expiry Date</p>
-                            <p className={`font-medium ${isExpired(selectedProduct.expiryDate) ? 'text-red-600' : isExpiringSoon(selectedProduct.expiryDate) ? 'text-amber-600' : ''}`}>
-                              {formatDate(selectedProduct.expiryDate) || 'N/A'}
-                              {isExpired(selectedProduct.expiryDate) && (
-                                <Badge variant="outline" className="ml-2 bg-red-50 text-red-700 border-red-200">
-                                  Expired
-                                </Badge>
-                              )}
-                              {isExpiringSoon(selectedProduct.expiryDate) && !isExpired(selectedProduct.expiryDate) && (
-                                <Badge variant="outline" className="ml-2 bg-amber-50 text-amber-700 border-amber-200">
-                                  Expires Soon
-                                </Badge>
-                              )}
-                            </p>
+                        <div>
+                          <div className="text-sm text-gray-500">Expiry Date</div>
+                          <div className={`font-medium ${isExpired(selectedProduct.expiryDate) ? 'text-red-600' : isExpiringSoon(selectedProduct.expiryDate) ? 'text-amber-600' : ''}`}>
+                            {formatDate(selectedProduct.expiryDate) || 'N/A'}
+                            {isExpired(selectedProduct.expiryDate) && (
+                              <Badge variant="outline" className="ml-2 bg-red-50 text-red-700 border-red-200">
+                                Expired
+                              </Badge>
+                            )}
+                            {isExpiringSoon(selectedProduct.expiryDate) && !isExpired(selectedProduct.expiryDate) && (
+                              <Badge variant="outline" className="ml-2 bg-amber-50 text-amber-700 border-amber-200">
+                                Expires Soon
+                              </Badge>
+                            )}
                           </div>
-                        )}
+                        </div>
                       </div>
                       
                       {/* Stock Update Form */}
@@ -1545,6 +1761,73 @@ export default function InventoryPage() {
                     </div>
 
                     <div className="grid gap-2">
+                      <label className="text-sm font-medium">Base Price (₱)</label>
+                      <Input 
+                        type="number" 
+                        placeholder="0.00" 
+                        name="basePrice"
+                        value={editProduct.basePrice}
+                        onChange={handleEditBasePriceChange}
+                        className={editErrors.basePrice ? 'border-red-300' : ''}
+                        step="0.01"
+                        min="0"
+                      />
+                      <p className="text-xs text-gray-500">The price at which the product was purchased from the supplier.</p>
+                      {editErrors.basePrice && <p className="text-xs text-red-500">{editErrors.basePrice}</p>}
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Profit Margin</label>
+                      <div className="flex gap-2">
+                        <Select 
+                          value={editProduct.profitType} 
+                          onValueChange={(value) => handleEditProfitChange(value, editProduct.profitValue)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select profit type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="percentage">Percentage (%)</SelectItem>
+                            <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input 
+                          type="number" 
+                          placeholder={editProduct.profitType === "percentage" ? "0%" : "₱0.00"} 
+                          name="profitValue"
+                          value={editProduct.profitValue}
+                          onChange={(e) => handleEditProfitChange(editProduct.profitType, e.target.value)}
+                          className={editErrors.profitValue ? 'border-red-300' : ''}
+                          step="0.01"
+                          min="0"
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {editProduct.profitType === "percentage" 
+                          ? "Percentage markup on the base price." 
+                          : "Fixed amount added to the base price."}
+                      </p>
+                      {editErrors.profitValue && <p className="text-xs text-red-500">{editErrors.profitValue}</p>}
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Selling Price (₱)</label>
+                      <Input 
+                        type="number" 
+                        placeholder="0.00" 
+                        name="price"
+                        value={editProduct.price}
+                        onChange={handleEditInputChange}
+                        className={editErrors.price ? 'border-red-300' : ''}
+                        step="0.01"
+                        min="0"
+                        readOnly
+                      />
+                      <p className="text-xs text-gray-500">Final selling price calculated from base price and profit margin.</p>
+                      {editErrors.price && <p className="text-xs text-red-500">{editErrors.price}</p>}
+                    </div>
+
+                    <div className="grid gap-2">
                       <label className="text-sm font-medium">Expiry Date (Optional)</label>
                       <Input 
                         type="date" 
@@ -1557,38 +1840,7 @@ export default function InventoryPage() {
                       <p className="text-xs text-gray-500">The date when this product will expire. Leave empty if not applicable.</p>
                     </div>
 
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Status</label>
-                      <div className="flex items-center space-x-2">
-                        <input 
-                          type="checkbox" 
-                          id="isActive"
-                          checked={editProduct.isActive} 
-                          onChange={(e) => setEditProduct({...editProduct, isActive: e.target.checked})}
-                          className="rounded border-gray-300 text-amber-600 shadow-sm focus:border-amber-300 focus:ring focus:ring-amber-200 focus:ring-opacity-50"
-                        />
-                        <label htmlFor="isActive" className="text-sm text-gray-700">
-                          {editProduct.isActive ? 'Active (visible in POS)' : 'Archived (hidden from POS)'}
-                        </label>
-                      </div>
-                    </div>
-
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="grid gap-2">
-                        <label className="text-sm font-medium">Price (₱)</label>
-                        <Input 
-                          type="number" 
-                          placeholder="0.00" 
-                          name="price"
-                          value={editProduct.price}
-                          onChange={handleEditInputChange}
-                          className={editErrors.price ? 'border-red-300' : ''}
-                          step="0.01"
-                          min="0"
-                        />
-                        {editErrors.price && <p className="text-xs text-red-500">{editErrors.price}</p>}
-                      </div>
-
                       <div className="grid gap-2">
                         <label className="text-sm font-medium">Stock</label>
                         <Input 
@@ -1601,6 +1853,22 @@ export default function InventoryPage() {
                           min="0"
                         />
                         {editErrors.stock && <p className="text-xs text-red-500">{editErrors.stock}</p>}
+                      </div>
+
+                      <div className="grid gap-2">
+                        <label className="text-sm font-medium">Status</label>
+                        <div className="flex items-center space-x-2">
+                          <input 
+                            type="checkbox" 
+                            id="isActive"
+                            checked={editProduct.isActive} 
+                            onChange={(e) => setEditProduct({...editProduct, isActive: e.target.checked})}
+                            className="rounded border-gray-300 text-amber-600 shadow-sm focus:border-amber-300 focus:ring focus:ring-amber-200 focus:ring-opacity-50"
+                          />
+                          <label htmlFor="isActive" className="text-sm text-gray-700">
+                            {editProduct.isActive ? 'Active (visible in POS)' : 'Archived (hidden from POS)'}
+                          </label>
+                        </div>
                       </div>
                     </div>
 
@@ -1754,6 +2022,73 @@ export default function InventoryPage() {
             </div>
 
             <div className="grid gap-2">
+              <label className="text-sm font-medium">Base Price (₱)</label>
+              <Input 
+                type="number" 
+                placeholder="0.00" 
+                name="basePrice"
+                value={newProduct.basePrice}
+                onChange={handleBasePriceChange}
+                className={errors.basePrice ? 'border-red-300' : ''}
+                step="0.01"
+                min="0"
+              />
+              <p className="text-xs text-gray-500">The price at which the product was purchased from the supplier.</p>
+              {errors.basePrice && <p className="text-xs text-red-500">{errors.basePrice}</p>}
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Profit Margin</label>
+              <div className="flex gap-2">
+                <Select 
+                  value={newProduct.profitType} 
+                  onValueChange={(value) => handleProfitChange(value, newProduct.profitValue)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select profit type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">Percentage (%)</SelectItem>
+                    <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input 
+                  type="number" 
+                  placeholder={newProduct.profitType === "percentage" ? "0%" : "₱0.00"} 
+                  name="profitValue"
+                  value={newProduct.profitValue}
+                  onChange={(e) => handleProfitChange(newProduct.profitType, e.target.value)}
+                  className={errors.profitValue ? 'border-red-300' : ''}
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              <p className="text-xs text-gray-500">
+                {newProduct.profitType === "percentage" 
+                  ? "Percentage markup on the base price." 
+                  : "Fixed amount added to the base price."}
+              </p>
+              {errors.profitValue && <p className="text-xs text-red-500">{errors.profitValue}</p>}
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Selling Price (₱)</label>
+              <Input 
+                type="number" 
+                placeholder="0.00" 
+                name="price"
+                value={newProduct.price}
+                onChange={handleInputChange}
+                className={errors.price ? 'border-red-300' : ''}
+                step="0.01"
+                min="0"
+                readOnly
+              />
+              <p className="text-xs text-gray-500">Final selling price calculated from base price and profit margin.</p>
+              {errors.price && <p className="text-xs text-red-500">{errors.price}</p>}
+            </div>
+
+            <div className="grid gap-2">
               <label className="text-sm font-medium">Expiry Date (Optional)</label>
               <Input 
                 type="date" 
@@ -1768,21 +2103,6 @@ export default function InventoryPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <label className="text-sm font-medium">Price (₱)</label>
-                <Input 
-                  type="number" 
-                  placeholder="0.00" 
-                  name="price"
-                  value={newProduct.price}
-                  onChange={handleInputChange}
-                  className={errors.price ? 'border-red-300' : ''}
-                  step="0.01"
-                  min="0"
-                />
-                {errors.price && <p className="text-xs text-red-500">{errors.price}</p>}
-              </div>
-
-              <div className="grid gap-2">
                 <label className="text-sm font-medium">Initial Stock</label>
                 <Input 
                   type="number" 
@@ -1795,16 +2115,16 @@ export default function InventoryPage() {
                 />
                 {errors.stock && <p className="text-xs text-red-500">{errors.stock}</p>}
               </div>
-            </div>
 
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Supplier</label>
-              <Input 
-                placeholder="Enter supplier name" 
-                name="supplier"
-                value={newProduct.supplier}
-                onChange={handleInputChange}
-              />
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Supplier</label>
+                <Input 
+                  placeholder="Enter supplier name" 
+                  name="supplier"
+                  value={newProduct.supplier}
+                  onChange={handleInputChange}
+                />
+              </div>
             </div>
 
             <div className="grid gap-2">

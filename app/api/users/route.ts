@@ -13,6 +13,7 @@ const CreateUserSchema = z.object({
   Phone: z.string().optional(),
   Address: z.string().optional(),
   InitialCredit: z.number().nonnegative().optional(),
+  CreditLimit: z.number().nonnegative().optional(),
 });
 
 // Schema for querying users

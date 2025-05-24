@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
+import { NotificationBell } from "@/components/ui/NotificationBell"
 
 interface NavbarProps {
   userType?: "cashier" | "admin" | "member"
@@ -72,13 +73,14 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
       return href === "/pos"
     }
 
-    // For exact matches (like /admin or /pos)
-    if (href === `/${userType}` && pathname === href) {
+    // For exact matches (like /admin or /pos or /members)
+    const homePathForUserType = userType === "member" ? "/members" : `/${userType}`;
+    if (href === homePathForUserType && pathname === href) {
       return true
     }
 
     // For nested routes (like /admin/inventory, /admin/members, etc.)
-    if (href !== `/${userType}` && pathname.startsWith(href)) {
+    if (href !== homePathForUserType && pathname?.startsWith(href)) {
       return true
     }
 
@@ -174,10 +176,14 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
           </nav>
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500"></span>
-            </Button>
+            {userType === "admin" || userType === "cashier" ? (
+              <NotificationBell />
+            ) : (
+              <Button variant="ghost" size="icon" className="relative">
+                <Bell className="h-5 w-5" />
+                <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500"></span>
+              </Button>
+            )}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -223,9 +229,9 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
             <nav className="flex flex-col space-y-1">
               {userType !== "cashier" && (
                 <Link
-                  href={`/${userType}`}
+                  href={`/${userType === "member" ? "members" : userType}`}
                   className={`px-3 py-2 text-sm font-medium transition-colors flex items-center ${
-                    pathname === `/${userType}`
+                    pathname === `/${userType === "member" ? "members" : userType}`
                       ? "text-amber-600 bg-amber-50 rounded-md"
                       : "text-gray-700 hover:text-amber-600"
                   }`}
@@ -250,14 +256,6 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
                   {link.label}
                 </Link>
               ))}
-              <button
-                className="px-3 py-2 text-sm font-medium transition-colors flex items-center text-gray-700 hover:text-amber-600"
-                onClick={handleLogout}
-                disabled={isLoggingOut}
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                {isLoggingOut ? "Logging out..." : "Log out"}
-              </button>
             </nav>
           </div>
         </div>

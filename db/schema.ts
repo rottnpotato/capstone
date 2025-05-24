@@ -29,9 +29,22 @@ export const Members = pgTable('Members', {
   Phone: varchar('Phone', { length: 50 }),
   Address: text('Address'),
   CreditBalance: decimal('CreditBalance', { precision: 10, scale: 2 }).default('0.00').notNull(),
+  CreditLimit: decimal('CreditLimit', { precision: 10, scale: 2 }).default('0.00').notNull(),
   UserId: integer('UserId').references(() => Users.UserId),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Verification tokens for account creation and password reset
+export const VerificationTokens = pgTable('VerificationTokens', {
+  TokenId: serial('TokenId').primaryKey(),
+  Token: varchar('Token', { length: 255 }).notNull().unique(),
+  Type: varchar('Type', { length: 50 }).notNull(), // 'account-verification', 'password-reset', etc.
+  MemberId: integer('MemberId').references(() => Members.MemberId),
+  UserId: integer('UserId').references(() => Users.UserId),
+  ExpiresAt: timestamp('ExpiresAt', { withTimezone: true }).notNull(),
+  CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
+  UsedAt: timestamp('UsedAt', { withTimezone: true }),
 });
 
 export const Categories = pgTable('Categories', {

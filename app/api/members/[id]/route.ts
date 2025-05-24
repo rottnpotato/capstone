@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { MemberRepository } from '@/db/repositories/MemberRepository';
+import { SendCreditLimitUpdateNotification } from '@/lib/notifications';
 
 // Helper function to format Date objects
 function formatDate(date: Date | null): string {
@@ -16,6 +17,7 @@ const UpdateMemberSchema = z.object({
   address: z.string().optional(),
   userId: z.number().optional().nullable(),
   creditBalance: z.number().nonnegative().optional(),
+  creditLimit: z.number().nonnegative().optional(),
 });
 
 /**
@@ -54,7 +56,7 @@ export async function GET(
       address: member.Address ?? 'N/A',
       joinDate: formatDate(member.CreatedAt),
       status: 'active', // Default status since no status column in DB yet
-      creditLimit: 5000, // Default credit limit
+      creditLimit: parseFloat(member.CreditLimit?.toString() ?? '0'),
       currentCredit: parseFloat(member.CreditBalance?.toString() ?? '0'),
       userId: member.UserId,
       roleId: null, // No RoleId in the GetById response
@@ -115,6 +117,11 @@ export async function PATCH(
       }, { status: 400 });
     }
     
+    // Store original credit limit for notification
+    const oldCreditLimit = parseFloat(existingMember.CreditLimit?.toString() ?? '0');
+    const isCreditLimitUpdated = validatedData.data.creditLimit !== undefined && 
+                                validatedData.data.creditLimit !== oldCreditLimit;
+    
     // Prepare update data
     const updateData: any = {};
     
@@ -142,6 +149,10 @@ export async function PATCH(
       updateData.CreditBalance = validatedData.data.creditBalance.toString();
     }
     
+    if (validatedData.data.creditLimit !== undefined) {
+      updateData.CreditLimit = validatedData.data.creditLimit.toString();
+    }
+    
     // Update the member
     const updatedMember = await MemberRepository.Update(memberId, updateData);
     
@@ -150,6 +161,22 @@ export async function PATCH(
         success: false,
         message: "Failed to update member"
       }, { status: 500 });
+    }
+    
+    // Send notification if credit limit was updated
+    if (isCreditLimitUpdated) {
+      try {
+        await SendCreditLimitUpdateNotification(
+          memberId,
+          updatedMember.Name,
+          updatedMember.Email,
+          oldCreditLimit,
+          validatedData.data.creditLimit as number
+        );
+      } catch (notifError) {
+        console.error('Error sending credit limit update notification:', notifError);
+        // Don't fail the update if notification fails
+      }
     }
     
     // Format updated member for response
@@ -161,6 +188,7 @@ export async function PATCH(
       address: updatedMember.Address ?? null,
       joinDate: formatDate(updatedMember.CreatedAt),
       currentCredit: parseFloat(updatedMember.CreditBalance?.toString() ?? '0'),
+      creditLimit: parseFloat(updatedMember.CreditLimit?.toString() ?? '0'),
       userId: updatedMember.UserId
     };
     

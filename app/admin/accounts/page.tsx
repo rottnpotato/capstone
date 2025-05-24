@@ -61,6 +61,7 @@ export default function AccountsPage() {
     RoleId: 0,
     Address: "",
     InitialCredit: 0,
+    CreditLimit: 0,
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -351,7 +352,8 @@ export default function AccountsPage() {
         if (isMember) {
           Object.assign(requestData, {
             Address: formData.Address || undefined,
-            InitialCredit: formData.InitialCredit || 0
+            InitialCredit: formData.InitialCredit || 0,
+            CreditLimit: formData.CreditLimit || 0,
           });
         }
         
@@ -386,6 +388,7 @@ export default function AccountsPage() {
             RoleId: 0,
             Address: "",
             InitialCredit: 0,
+            CreditLimit: 0,
           });
 
           // Refresh user list
@@ -652,7 +655,7 @@ export default function AccountsPage() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-lg w-full max-w-md p-6 max-h-screen"
+            className="bg-white rounded-lg w-full max-w-md p-6 max-h-screen overflow-y-auto"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-bold">Create New Account</h3>
@@ -759,6 +762,22 @@ export default function AccountsPage() {
                         onChange={handleInputChange}
                       />
                       {errors.InitialCredit && <p className="text-sm text-red-500 mt-1">{errors.InitialCredit}</p>}
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="CreditLimit">Credit Limit</Label>
+                      <Input
+                        id="CreditLimit"
+                        name="CreditLimit"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={formData.CreditLimit}
+                        onChange={handleInputChange}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Maximum amount of credit this member can use for purchases</p>
+                      {errors.CreditLimit && <p className="text-sm text-red-500 mt-1">{errors.CreditLimit}</p>}
                     </div>
                   </>
                 )}

@@ -71,7 +71,7 @@ export async function AuthenticateUser(email: string, password: string) {
       redirectUrl = '/admin';
     } else if (role.Name === 'Cashier') {
       redirectUrl = '/pos';
-    } else if (role.Name === 'Members') {
+    } else if (role.Name === 'Member') {
       redirectUrl = '/members';
     }
     

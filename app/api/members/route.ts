@@ -43,6 +43,7 @@ const CreateMemberSchema = z.object({
   address: z.string().optional(),
   userId: z.number().optional(),
   initialCredit: z.number().nonnegative().default(0),
+  creditLimit: z.number().nonnegative().default(0),
 });
 
 // Helper function to format Date objects
@@ -184,6 +185,7 @@ export async function POST(request: Request) {
       Phone: validatedData.phone,
       Address: validatedData.address,
       CreditBalance: validatedData.initialCredit.toString(),
+      CreditLimit: validatedData.creditLimit.toString(),
       UserId: validatedData.userId
     });
     
@@ -201,6 +203,7 @@ export async function POST(request: Request) {
         phone: newMember.Phone || null,
         joinDate: formatDate(newMember.CreatedAt),
         currentCredit: parseFloat(newMember.CreditBalance || '0'),
+        creditLimit: parseFloat(newMember.CreditLimit || '0'),
         userId: newMember.UserId
       }
     }, { status: 201 });

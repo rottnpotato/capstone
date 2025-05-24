@@ -225,12 +225,16 @@ const SendReceiptEmail = async (
  * @param memberName - Member's name
  * @param subject - Email subject
  * @param message - Email message
+ * @param actionUrl - Optional action URL
+ * @param actionText - Optional action button text
  */
 const SendMemberNotification = async (
   memberEmail: string,
   memberName: string,
   subject: string,
-  message: string
+  message: string,
+  actionUrl?: string,
+  actionText?: string
 ) => {
   return SendEmail(
     memberEmail,
@@ -240,6 +244,9 @@ const SendMemberNotification = async (
       memberName,
       message,
       subject,
+      actionUrl,
+      actionText,
+      loginUrl: `${process.env.NEXT_PUBLIC_APP_URL || ''}/login`,
       currentYear: new Date().getFullYear(),
     }
   );
@@ -249,8 +256,8 @@ const SendMemberNotification = async (
  * Send a contact form submission
  * @param name - Sender name
  * @param email - Sender email
- * @param subject - Message subject
- * @param message - Message content
+ * @param subject - Email subject
+ * @param message - Email message
  */
 const SendContactFormEmail = async (
   name: string,
@@ -260,14 +267,39 @@ const SendContactFormEmail = async (
 ) => {
   // Send to admin
   return SendEmail(
-    FROM_EMAIL, // Send to admin email
-    `New Contact Form Submission: ${subject}`,
+    process.env.ADMIN_EMAIL || 'admin@pandol.com',
+    `Contact Form: ${subject}`,
     'contact-form',
     {
       name,
       email,
       subject,
       message,
+      currentYear: new Date().getFullYear(),
+    }
+  );
+};
+
+/**
+ * Send account verification email to a member
+ * @param memberEmail - Member's email address
+ * @param memberName - Member's name
+ * @param verificationToken - Verification token
+ */
+const SendAccountVerificationEmail = async (
+  memberEmail: string,
+  memberName: string,
+  verificationToken: string
+) => {
+  const verificationUrl = `${process.env.NEXT_PUBLIC_APP_URL || ''}/verify-account?token=${verificationToken}`;
+  
+  return SendEmail(
+    memberEmail,
+    'Verify Your Pandol Account',
+    'account-verification',
+    {
+      memberName,
+      verificationUrl,
       currentYear: new Date().getFullYear(),
     }
   );
@@ -281,6 +313,7 @@ export const EmailService = {
   SendReceiptEmail,
   SendMemberNotification,
   SendContactFormEmail,
+  SendAccountVerificationEmail,
 };
 
 export default EmailService; 
