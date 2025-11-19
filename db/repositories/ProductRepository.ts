@@ -1,6 +1,6 @@
 import { db } from '../connection';
 import { Products, Categories } from '../schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, lte } from 'drizzle-orm';
 
 /**
  * Repository for Product data access
@@ -31,16 +31,6 @@ export class ProductRepository {
         .where(eq(Products.CategoryId, categoryId));
     } catch (error) {
       console.error(`Error getting products for category ${categoryId}:`, error);
-      throw error;
-    }
-  }
-
-  static async GetAllCategory() {
-    try {
-      return await db.select()
-        .from(Categories);
-    } catch (error) {
-      console.error(`Error getting category :`, error);
       throw error;
     }
   }
@@ -209,12 +199,17 @@ export class ProductRepository {
   /**
    * Get low stock products
    */
-  static async GetLowStock(threshold: number = 10) {
+  static async GetLowStock(threshold: number = 10, includeArchived: boolean = false) {
     try {
       return await db.select()
         .from(Products)
         .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
-        .where(eq(Products.StockQuantity, threshold));
+        .where(
+          and(
+            lte(Products.StockQuantity, threshold),
+            includeArchived ? undefined : eq(Products.IsActive, true)
+          )
+        );
     } catch (error) {
       console.error(`Error getting low stock products:`, error);
       throw error;

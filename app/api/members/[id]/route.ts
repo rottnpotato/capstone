@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { MemberRepository } from '@/db/repositories/MemberRepository';
 import { SendCreditLimitUpdateNotification } from '@/lib/notifications';
+import { DeleteMember } from '@/app/admin/members/actions';
 
 // Helper function to format Date objects
 function formatDate(date: Date | null): string {
@@ -225,19 +226,19 @@ export async function DELETE(
       }, { status: 400 });
     }
     
-    const deletedMember = await MemberRepository.Delete(memberId);
+    const result = await DeleteMember(params.id);
     
-    if (!deletedMember) {
+    if (!result.success) {
       return NextResponse.json({
         success: false,
-        message: "Member not found or already deleted"
+        message: result.message || "Failed to delete member"
       }, { status: 404 });
     }
     
     return NextResponse.json({
       success: true,
-      message: "Member deleted successfully",
-      memberId: deletedMember.MemberId
+      message: result.message || "Member deleted successfully",
+      memberId: memberId
     });
     
   } catch (error: any) {

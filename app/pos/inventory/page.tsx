@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion } from "framer-motion"
-import { Search, Plus, Package, ArrowUpDown, MoreHorizontal, Edit, Trash2, AlertCircle, Image as ImageIcon } from "lucide-react"
+import { Search, Plus, Package, ArrowUpDown, MoreHorizontal, Edit, Trash2, AlertCircle, Image as ImageIcon,Archive } from "lucide-react"
 import { Navbar } from "@/components/ui/navbar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -96,9 +96,7 @@ const isExpiringSoon = (dateString: string | null | undefined) => {
 
 // Add a helper function to determine stock status
 const getStockStatus = (stock: number) => {
-  if (stock <= 5) return { color: 'text-red-500', badge: 'Critical', bgColor: 'bg-red-100' };
-  if (stock < 10) return { color: 'text-red-500', badge: 'Low', bgColor: 'bg-red-100' };
-  if (stock < 30) return { color: 'text-amber-500', badge: 'Medium', bgColor: 'bg-amber-100' };
+  if (stock < 15) return { color: 'text-red-500', badge: 'Low', bgColor: 'bg-red-100' };
   return { color: 'text-green-500', badge: null, bgColor: 'bg-green-100' };
 };
 
@@ -1478,7 +1476,7 @@ export default function InventoryPage() {
                                         handleDeleteProduct(product.id);
                                       }}
                                     >
-                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      <Archive className="h-4 w-4 mr-2" />
                                       Archive Product
                                     </DropdownMenuItem>
                                   ) : (

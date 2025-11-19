@@ -1,4 +1,5 @@
 import { pgTable, serial, varchar, text, integer, timestamp, decimal, uniqueIndex, foreignKey, primaryKey, pgEnum, boolean } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
 
 // Enums (if applicable, e.g., for Credit Type)
 export const CreditTypeEnum = pgEnum('CreditType', ['Earned', 'Spent', 'Adjustment']);
@@ -22,6 +23,17 @@ export const Users = pgTable('Users', {
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const usersRelations = relations(Users, ({ one }) => ({
+  Role: one(Roles, {
+    fields: [Users.RoleId],
+    references: [Roles.RoleId],
+  }),
+  Member: one(Members, {
+    fields: [Users.UserId],
+    references: [Members.UserId],
+  }),
+}));
+
 export const Members = pgTable('Members', {
   MemberId: serial('MemberId').primaryKey(),
   Name: varchar('Name', { length: 255 }).notNull(),
@@ -33,7 +45,15 @@ export const Members = pgTable('Members', {
   UserId: integer('UserId').references(() => Users.UserId),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
+  Status: varchar('Status', { length: 50 }).default('active').notNull(), // e.g., 'active', 'inactive', 'suspended'
 });
+
+export const membersRelations = relations(Members, ({ one, many }) => ({
+  User: one(Users, { fields: [Members.UserId], references: [Users.UserId] }),
+  Transactions: many(Transactions),
+  MemberActivities: many(MemberActivities),
+Credits: many(Credits),
+}));
 
 // Verification tokens for account creation and password reset
 export const VerificationTokens = pgTable('VerificationTokens', {
@@ -55,12 +75,17 @@ export const Categories = pgTable('Categories', {
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const categoriesRelations = relations(Categories, ({ many }) => ({
+  Products: many(Products),
+}));
+
 export const Products = pgTable('Products', {
   ProductId: serial('ProductId').primaryKey(),
   Name: varchar('Name', { length: 255 }).notNull(),
   Description: text('Description'),
   Sku: varchar('Sku', { length: 100 }).notNull().unique(),
   Price: decimal('Price', { precision: 10, scale: 2 }).notNull(),
+  BasePrice: decimal('BasePrice', { precision: 10, scale: 2 }).default('0.00').notNull(),
   StockQuantity: integer('StockQuantity').default(0).notNull(),
   CategoryId: integer('CategoryId').notNull().references(() => Categories.CategoryId),
   Image: text('Image'),
@@ -71,6 +96,14 @@ export const Products = pgTable('Products', {
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const productsRelations = relations(Products, ({ one, many }) => ({
+  Category: one(Categories, {
+    fields: [Products.CategoryId],
+    references: [Categories.CategoryId],
+  }),
+  TransactionItems: many(TransactionItems),
+}));
+
 export const Transactions = pgTable('Transactions', {
   TransactionId: serial('TransactionId').primaryKey(),
   Timestamp: timestamp('Timestamp', { withTimezone: true }).defaultNow().notNull(),
@@ -78,9 +111,19 @@ export const Transactions = pgTable('Transactions', {
   MemberId: integer('MemberId').references(() => Members.MemberId), // Optional member
   TotalAmount: decimal('TotalAmount', { precision: 10, scale: 2 }).notNull(),
   PaymentMethod: varchar('PaymentMethod', { length: 50 }),
+  ManualDiscountAmount: decimal('ManualDiscountAmount', { precision: 10, scale: 2 }).default('0.00'),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const transactionsRelations = relations(Transactions, ({ one, many }) => ({
+  User: one(Users, { fields: [Transactions.UserId], references: [Users.UserId] }),
+  Member: one(Members, {
+    fields: [Transactions.MemberId],
+    references: [Members.MemberId],
+  }),
+  TransactionItems: many(TransactionItems),
+}));
 
 export const TransactionItems = pgTable('TransactionItems', {
   TransactionItemId: serial('TransactionItemId').primaryKey(),
@@ -88,9 +131,19 @@ export const TransactionItems = pgTable('TransactionItems', {
   ProductId: integer('ProductId').notNull().references(() => Products.ProductId),
   Quantity: integer('Quantity').notNull(),
   PriceAtTimeOfSale: decimal('PriceAtTimeOfSale', { precision: 10, scale: 2 }).notNull(),
+  BasePriceAtTimeOfSale: decimal('BasePriceAtTimeOfSale', { precision: 10, scale: 2 }).default('0.00').notNull(),
+  Profit: decimal('Profit', { precision: 10, scale: 2 }).default('0.00').notNull(),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const transactionItemsRelations = relations(TransactionItems, ({ one }) => ({
+  Transaction: one(Transactions, {
+    fields: [TransactionItems.TransactionId],
+    references: [Transactions.TransactionId],
+  }),
+  Product: one(Products, { fields: [TransactionItems.ProductId], references: [Products.ProductId] }),
+}));
 
 export const Credits = pgTable('Credits', {
   CreditId: serial('CreditId').primaryKey(),
@@ -98,10 +151,22 @@ export const Credits = pgTable('Credits', {
   Amount: decimal('Amount', { precision: 10, scale: 2 }).notNull(),
   Type: CreditTypeEnum('Type').notNull(),
   RelatedTransactionId: integer('RelatedTransactionId').references(() => Transactions.TransactionId), // Optional link to transaction
+  Notes: text('Notes'), // To store info like "Credit payment received"
   Timestamp: timestamp('Timestamp', { withTimezone: true }).defaultNow().notNull(),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const rolesRelations = relations(Roles, ({ many }) => ({
+	users: many(Users),
+}));
+
+export const creditsRelations = relations(Credits, ({ one }) => ({
+  Member: one(Members, {
+    fields: [Credits.MemberId],
+    references: [Members.MemberId],
+  }),
+}));
 
 export const Events = pgTable('Events', {
   EventId: serial('EventId').primaryKey(),
@@ -122,4 +187,16 @@ export const MemberActivities = pgTable('MemberActivities', {
   RelatedTransactionId: integer('RelatedTransactionId').references(() => Transactions.TransactionId),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
-}); 
+  Description: text("description"),
+}, (table) => {
+  return {
+    relatedTransactionFk: foreignKey({ name: 'member_activity_transaction_fk', columns: [table.RelatedTransactionId], foreignColumns: [Transactions.TransactionId] }),
+  };
+});
+
+export const memberActivitiesRelations = relations(MemberActivities, ({ one }) => ({
+  Member: one(Members, {
+    fields: [MemberActivities.MemberId],
+    references: [Members.MemberId],
+  }),
+}));

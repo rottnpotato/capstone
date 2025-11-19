@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label"
 export default function AccountSetupPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const token = searchParams.get("token")
+  const token = searchParams?.get("token") // Add optional chaining
   
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")

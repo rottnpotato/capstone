@@ -137,6 +137,7 @@ async function seed() {
         Description: 'Premium white rice, 5kg',
         Sku: 'GRO-001',
         Price: '250.00',
+        BasePrice: '200.00',
         StockQuantity: 100,
         CategoryId: groceryCategoryId,
         Supplier: 'ABC Farm Supplies',
@@ -147,6 +148,7 @@ async function seed() {
         Description: '16GB USB 3.0 Flash Drive',
         Sku: 'ELE-001',
         Price: '350.00',
+        BasePrice: '280.00',
         StockQuantity: 30,
         CategoryId: electronicsCategoryId,
         Supplier: 'Tech Gadgets Inc',
@@ -157,6 +159,7 @@ async function seed() {
         Description: 'Liquid dish soap, 500ml',
         Sku: 'HOU-001',
         Price: '75.50',
+        BasePrice: '60.00',
         StockQuantity: 50,
         CategoryId: householdCategoryId,
         Supplier: 'Home Clean Supplies',
@@ -167,6 +170,7 @@ async function seed() {
         Description: 'College-ruled notebook, 100 pages',
         Sku: 'SCH-001',
         Price: '45.00',
+        BasePrice: '30.00',
         StockQuantity: 200,
         CategoryId: schoolCategoryId,
         Supplier: 'ABC School Supplies',
@@ -177,6 +181,7 @@ async function seed() {
         Description: 'Purified water, 500ml',
         Sku: 'BEV-001',
         Price: '15.00',
+        BasePrice: '10.00',
         StockQuantity: 500,
         CategoryId: beveragesCategoryId,
         Supplier: 'Clean Waters Inc',
@@ -229,43 +234,57 @@ async function seed() {
         TransactionId: transactions[0].TransactionId,
         ProductId: riceProductId,
         Quantity: 1,
-        PriceAtTimeOfSale: '250.00'
+        PriceAtTimeOfSale: '250.00',
+        BasePriceAtTimeOfSale: '200.00',
+        Profit: '50.00'
       },
       {
         TransactionId: transactions[0].TransactionId,
         ProductId: waterProductId,
         Quantity: 2,
-        PriceAtTimeOfSale: '15.00'
+        PriceAtTimeOfSale: '15.00',
+        BasePriceAtTimeOfSale: '10.00',
+        Profit: '10.00'
       },
       {
         TransactionId: transactions[0].TransactionId,
         ProductId: notebookProductId,
         Quantity: 1,
-        PriceAtTimeOfSale: '45.00'
+        PriceAtTimeOfSale: '45.00',
+        BasePriceAtTimeOfSale: '30.00',
+        Profit: '15.00'
       },
       {
         TransactionId: transactions[0].TransactionId,
         ProductId: dishSoapProductId,
         Quantity: 1,
-        PriceAtTimeOfSale: '75.50'
+        PriceAtTimeOfSale: '75.50',
+        BasePriceAtTimeOfSale: '60.00',
+        Profit: '15.50'
       },
       {
         TransactionId: transactions[1].TransactionId,
         ProductId: usbProductId,
         Quantity: 1,
-        PriceAtTimeOfSale: '350.00'
+        PriceAtTimeOfSale: '350.00',
+        BasePriceAtTimeOfSale: '280.00',
+        Profit: '70.00'
       },
       {
         TransactionId: transactions[1].TransactionId,
         ProductId: riceProductId,
         Quantity: 2,
-        PriceAtTimeOfSale: '250.00'
+        PriceAtTimeOfSale: '250.00',
+        BasePriceAtTimeOfSale: '200.00',
+        Profit: '100.00'
       },
       {
         TransactionId: transactions[2].TransactionId,
         ProductId: waterProductId,
         Quantity: 6,
-        PriceAtTimeOfSale: '15.00'
+        PriceAtTimeOfSale: '15.00',
+        BasePriceAtTimeOfSale: '10.00',
+        Profit: '30.00'
       }
     ]).returning();
     console.log(`Seeded ${transactionItems.length} transaction items`);

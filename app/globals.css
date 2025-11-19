@@ -55,6 +55,14 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Add your background image here */
+    background-image: url('/1864.jpg_wh860.png');
+
+    /* These lines make the background image look good */
+    background-size: cover;          /* Ensures the image covers the whole screen */
+    background-position: center;     /* Centers the image */
+    background-repeat: no-repeat;    /* Prevents the image from tiling */
+    background-attachment: fixed;    /* Makes the background stay in place on scroll */
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }

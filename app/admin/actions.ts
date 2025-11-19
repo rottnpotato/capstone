@@ -7,7 +7,8 @@ import { EventRepository } from '@/db/repositories/EventRepository';
 import { MemberActivityRepository } from '@/db/repositories/MemberActivityRepository';
 import { count, sql, desc, and, gte, lte, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { Transactions, Products, Members, Credits, TransactionItems } from '@/db/schema';
+import { Transactions, Products, Members, Credits, TransactionItems, Categories, MemberActivities, Events } from '@/db/schema';
+import { CalendarEvent } from "../api/calendar/route"
 
 // Transaction interfaces for admin dashboard
 export interface AdminTransaction {
@@ -75,6 +76,70 @@ export interface DashboardStats {
     trend: 'up' | 'down';
   };
 }
+
+export interface Sale {
+  id: number;
+  productName: string;
+  quantity: number;
+  price: number;
+  total: number;
+  profit: number;
+  createdAt: string;
+}
+
+export interface SalesReportData {
+  totalRevenue: number;
+  totalSales: number;
+  totalProfit: number;
+  sales: Sale[];
+}
+
+export async function GetSalesReport(startDate: Date, endDate: Date): Promise<SalesReportData> {
+  try {
+    const transactions = await TransactionRepository.GetByDateRange(startDate, endDate);
+    
+    const sales: Sale[] = [];
+    for (const { Transactions: transaction } of transactions) {
+      const items = await TransactionRepository.GetItemsByTransactionId(transaction.TransactionId);
+      if (items) {
+        for (const item of items) {
+          const price = parseFloat(item.TransactionItems.PriceAtTimeOfSale);
+          const quantity = item.TransactionItems.Quantity;
+          const profit = parseFloat(item.TransactionItems.Profit ?? '0.00');
+          sales.push({
+            id: transaction.TransactionId,
+            productName: item.Products?.Name || 'N/A',
+            quantity: quantity,
+            price: price,
+            total: quantity * price,
+            profit: profit,
+            createdAt: transaction.Timestamp.toISOString(),
+          });
+        }
+      }
+    }
+    const totalRevenue = sales.reduce((sum, sale) => sum + sale.total, 0);
+    const totalProfit = sales.reduce((sum, sale) => sum + sale.profit, 0);
+
+    return {
+      totalRevenue,
+      totalSales: sales.length,
+      totalProfit,
+      sales,
+    };
+  } catch (error) {
+    console.error("Error generating sales report", error);
+    // Re-throwing the error will be caught by the page's try-catch block
+    // and display the "Error loading sales data" message.
+    if (error instanceof Error) {
+      throw new Error(`Failed to generate sales report: ${error.message}`);
+    }
+    throw new Error('Failed to generate sales report due to an unknown error.');
+  }
+
+
+  };
+
 
 /**
  * Get recent transactions for admin dashboard
@@ -363,7 +428,7 @@ export async function GetRecentMemberActivities(limit: number = 5): Promise<Memb
   try {
     const activitiesData = await MemberActivityRepository.GetRecent(limit);
     
-    return activitiesData.map(activity => {
+    return activitiesData.map((activity: { MemberActivities: typeof MemberActivities.$inferSelect, Members: typeof Members.$inferSelect | null }) => {
       // Format the timestamp as a relative time (e.g., "2 hours ago", "Yesterday", etc.)
       const activityTime = activity.MemberActivities.Timestamp;
       let timeString: string;
@@ -405,7 +470,7 @@ export async function GetUpcomingEvents(limit: number = 4): Promise<UpcomingEven
   try {
     const eventsData = await EventRepository.GetUpcoming(limit);
     
-    return eventsData.map(event => {
+    return eventsData.map((event: typeof Events.$inferSelect) => {
       // Format the date as "MMM D, YYYY" (e.g., "Apr 15, 2023")
       const eventDate = event.EventDate.toLocaleDateString('en-US', { 
         month: 'short', 
@@ -424,5 +489,246 @@ export async function GetUpcomingEvents(limit: number = 4): Promise<UpcomingEven
   } catch (error) {
     console.error("Error fetching upcoming events:", error);
     return [];
+  }
+}
+
+/**
+ * Get sales data for charts
+ * @param timeRange The time range to calculate stats for (day, week, month, year)
+ * @returns Daily sales data for the selected time range
+ */
+export async function GetSalesData(timeRange: string = 'week'): Promise<{ date: string; amount: number }[]> {
+  try {
+    // Calculate date ranges based on the selected time range
+    const endDate = new Date();
+    let startDate = new Date();
+    let daysToShow = 7; // Default for week
+    
+    switch (timeRange) {
+      case 'day':
+        startDate.setHours(0, 0, 0, 0);
+        daysToShow = 24; // Show hourly data for day view
+        break;
+      case 'week':
+        startDate.setDate(endDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        daysToShow = 7;
+        break;
+      case 'month':
+        startDate.setDate(endDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+        daysToShow = 30;
+        break;
+      case 'year':
+        startDate.setFullYear(endDate.getFullYear() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        daysToShow = 12; // Show monthly data for year view
+        break;
+    }
+    
+    // Get all transactions within the date range
+    const transactions = await db.select({
+      timestamp: Transactions.Timestamp,
+      amount: Transactions.TotalAmount
+    })
+    .from(Transactions)
+    .where(
+      and(
+        gte(Transactions.Timestamp, startDate),
+        lte(Transactions.Timestamp, endDate)
+      )
+    );
+    
+    // Generate data points based on time range
+    let result: { date: string; amount: number }[] = [];
+    
+    if (timeRange === 'day') {
+      // Hourly data for day view
+      for (let i = 0; i < 24; i++) {
+        const hour = i.toString().padStart(2, '0');
+        const dateKey = `${hour}:00`;
+        
+        // Filter transactions for this hour
+        const hourlyTransactions = transactions.filter(t => {
+          const transactionHour = t.timestamp.getHours();
+          return transactionHour === i;
+        });
+        
+        // Calculate total amount for this hour
+        const hourlyTotal = hourlyTransactions.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+        
+        result.push({
+          date: dateKey,
+          amount: parseFloat(hourlyTotal.toFixed(2))
+        });
+      }
+    } else if (timeRange === 'year') {
+      // Monthly data for year view
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      for (let i = 0; i < 12; i++) {
+        // Calculate month index relative to current month
+        const monthIndex = (endDate.getMonth() - 11 + i + 12) % 12;
+        const monthKey = months[monthIndex];
+        
+        // Filter transactions for this month
+        const monthlyTransactions = transactions.filter(t => {
+          return t.timestamp.getMonth() === monthIndex;
+        });
+        
+        // Calculate total amount for this month
+        const monthlyTotal = monthlyTransactions.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+        
+        result.push({
+          date: monthKey,
+          amount: parseFloat(monthlyTotal.toFixed(2))
+        });
+      }
+    } else {
+      // Daily data for week/month view
+      for (let i = 0; i < daysToShow; i++) {
+        const date = new Date(startDate);
+        date.setDate(date.getDate() + i);
+        
+        const dateKey = date.toLocaleDateString('en-US', { 
+          month: 'short', 
+          day: 'numeric'
+        });
+        
+        // Filter transactions for this day
+        const dailyTransactions = transactions.filter(t => {
+          return t.timestamp.getDate() === date.getDate() && 
+                 t.timestamp.getMonth() === date.getMonth() && 
+                 t.timestamp.getFullYear() === date.getFullYear();
+        });
+        
+        // Calculate total amount for this day
+        const dailyTotal = dailyTransactions.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+        
+        result.push({
+          date: dateKey,
+          amount: parseFloat(dailyTotal.toFixed(2))
+        });
+      }
+    }
+    
+    return result;
+  } catch (error) {
+    console.error("Error fetching sales data for charts:", error);
+    return [];
+  }
+}
+
+/**
+ * Get revenue distribution by category
+ * @param timeRange The time range to calculate stats for (day, week, month, year)
+ * @returns Revenue share by product categories
+ */
+export async function GetRevenueDistribution(timeRange: string = 'week'): Promise<{ name: string; value: number; percentage: number }[]> {
+  try {
+    console.log("GetRevenueDistribution called with timeRange:", timeRange);
+    
+    // Calculate date ranges based on the selected time range
+    const endDate = new Date();
+    let startDate = new Date();
+    
+    switch (timeRange) {
+      case 'day':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(endDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'month':
+        startDate.setDate(endDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'year':
+        startDate.setFullYear(endDate.getFullYear() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+    }
+    
+    console.log("Date range:", { startDate, endDate });
+    
+    // Get all transactions with items in the date range
+    const transactionItemsData = await db
+      .select({
+        categoryName: sql<string>`COALESCE(${Categories.Name}, 'Uncategorized')`,
+        amount: sql<number>`SUM(${TransactionItems.Quantity} * CAST(${TransactionItems.PriceAtTimeOfSale} AS DECIMAL(10,2)))`
+      })
+      .from(TransactionItems)
+      .innerJoin(Transactions, eq(TransactionItems.TransactionId, Transactions.TransactionId))
+      .leftJoin(Products, eq(TransactionItems.ProductId, Products.ProductId))
+      .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
+      .where(
+        and(
+          gte(Transactions.Timestamp, startDate),
+          lte(Transactions.Timestamp, endDate)
+        )
+      )
+      .groupBy(sql`COALESCE(${Categories.Name}, 'Uncategorized')`);
+    
+    console.log("Raw SQL results:", transactionItemsData);
+    
+    // Calculate total revenue
+    const totalRevenue = transactionItemsData.reduce((sum, item) => sum + item.amount, 0);
+    console.log("Total revenue calculated:", totalRevenue);
+    
+    // Handle case with no data
+    if (transactionItemsData.length === 0 || totalRevenue === 0) {
+      console.log("No transaction data found for the selected period");
+      return [];
+    }
+    
+    // Format data for pie chart
+    const result = transactionItemsData.map(item => ({
+      name: item.categoryName,
+      value: parseFloat(item.amount.toFixed(2)),
+      percentage: parseFloat(((item.amount / totalRevenue) * 100).toFixed(1))
+    }));
+    
+    // Sort by value in descending order
+    const sortedResult = result.sort((a, b) => b.value - a.value);
+    console.log("Final processed result:", sortedResult);
+    
+    return sortedResult;
+  } catch (error) {
+    console.error("Error fetching revenue distribution data for charts:", error);
+    return [];
+  }
+}
+
+export async function GetCalendarEvents(limit: number = 4): Promise<CalendarEvent[]> {
+  try {
+    // Get current date
+    const currentDate = new Date()
+    const month = currentDate.getMonth()
+    const year = currentDate.getFullYear()
+    
+    // Fetch upcoming events from the calendar API
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/calendar?month=${month}&year=${year}`, {
+      cache: 'no-store'
+    })
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch calendar events')
+    }
+    
+    const events = await response.json()
+    
+    // Sort by date (soonest first) and limit
+    return events
+      .sort((a: CalendarEvent, b: CalendarEvent) => 
+        new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+      )
+      .filter((event: CalendarEvent) => 
+        new Date(event.startDate) >= currentDate
+      )
+      .slice(0, limit)
+  } catch (error) {
+    console.error('Error fetching calendar events:', error)
+    return []
   }
 } 

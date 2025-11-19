@@ -3,11 +3,11 @@ import { Categories } from '../schema';
 import { eq } from 'drizzle-orm';
 
 /**
- * Repository for Product data access
+ * Repository for Category data access
  */
 export class CategoryRepository {
   /**
-   * Get all products
+   * Get all categories
    */
   
   static async GetAllCategory() {

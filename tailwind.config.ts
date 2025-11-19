@@ -120,6 +120,9 @@ const config = {
           900: "#064e3b",
           950: "#022c22",
         },
+        // white: {
+        //   500: "#ffffff",
+        // },
       },
       borderRadius: {
         lg: "var(--radius)",

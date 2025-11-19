@@ -19,7 +19,8 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/components/ui/use-toast"
 import { Spinner } from "@/components/ui/spinner"
-import { GetTransactions, SendReceiptEmail } from "../actions"
+import { getTransactions, sendReceiptEmail } from "../actions"
+
 
 // Transaction type definition
 interface Transaction {
@@ -27,6 +28,8 @@ interface Transaction {
   Date: string
   Time: string
   Items: number
+  DiscountAmount?: number
+  ManualDiscountAmount?: number
   Total: number
   AmountReceived?: number
   Change?: number
@@ -40,6 +43,7 @@ interface Transaction {
     Name: string
     Quantity: number
     Price: number
+    OriginalPrice: number
   }[]
 }
 
@@ -63,7 +67,7 @@ export default function TransactionsPage() {
       setError(null)
       
       try {
-        const data = await GetTransactions()
+        const data = await getTransactions()
         setTransactions(data)
       } catch (err) {
         console.error("Error fetching transactions:", err)
@@ -131,7 +135,7 @@ export default function TransactionsPage() {
     })
     
     try {
-      const result = await SendReceiptEmail(
+      const result = await sendReceiptEmail(
         selectedTransaction.Id,
         selectedTransaction.MemberEmail,
         selectedTransaction.Member || "Customer"
@@ -383,11 +387,16 @@ export default function TransactionsPage() {
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {selectedTransaction.ItemDetails.map((item, index) => (
                     <div key={index} className="flex justify-between text-sm">
-                      <div>
+                      <div className="flex-1">
                         <span className="font-medium">{item.Name}</span>
                         <div className="text-gray-600">
                           {item.Quantity} x ₱{item.Price ? item.Price.toFixed(2) : "0.00"}
                         </div>
+                        {item.OriginalPrice && item.OriginalPrice > item.Price && (
+                          <div className="text-xs text-gray-500 pl-2">
+                            (Original: ₱{item.OriginalPrice.toFixed(2)})
+                          </div>
+                        )}
                       </div>
                       <span className="font-medium">
                         ₱{item.Price && item.Quantity ? (item.Price * item.Quantity).toFixed(2) : "0.00"}
@@ -398,6 +407,22 @@ export default function TransactionsPage() {
               </div>
 
               <div className="border-t border-dashed border-gray-200 pt-4 space-y-2">
+                {(selectedTransaction.DiscountAmount ?? 0) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Item Discounts:</span>
+                    <span className="text-red-600">
+                      - ₱{selectedTransaction.DiscountAmount?.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                {(selectedTransaction.ManualDiscountAmount ?? 0) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Manual Discount:</span>
+                    <span className="text-red-600">
+                      - ₱{selectedTransaction.ManualDiscountAmount?.toFixed(2)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between font-bold">
                   <span>Total:</span>
                   <span className="text-amber-600">

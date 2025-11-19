@@ -159,6 +159,7 @@ export class UserRepository {
    * Get users with optional filtering
    */
   static async GetUsers(options?: {
+    userId?: number;
     roleId?: number;
     searchQuery?: string;
     page?: number;
@@ -172,6 +173,10 @@ export class UserRepository {
       // Build the where clause
       let whereClause = undefined;
       
+      if (options?.userId) {
+        whereClause = eq(Users.UserId, options.userId);
+      }
+
       if (options?.roleId) {
         whereClause = eq(Users.RoleId, options.roleId);
       }
@@ -242,6 +247,7 @@ export class UserRepository {
       Email?: string;
       Password?: string;
       RoleId?: number;
+      IsActive?: boolean;
     }
   ) {
     try {
@@ -289,6 +295,10 @@ export class UserRepository {
 
       if (userData.RoleId) {
         updateData.RoleId = userData.RoleId;
+      }
+
+      if (userData.IsActive !== undefined) {
+        updateData.IsActive = userData.IsActive;
       }
 
       // Update timestamp

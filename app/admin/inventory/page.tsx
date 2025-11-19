@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { motion } from "framer-motion"
 import { Navbar } from "@/components/ui/navbar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Package, Search, Plus, ArrowUpDown, MoreHorizontal, Edit, Trash2, AlertCircle, Barcode } from "lucide-react"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { Package, Search, Plus, ArrowUpDown, MoreHorizontal, Edit, Trash2, AlertCircle, Barcode, Archive } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +26,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import Image from "next/image"
+import {
+  DollarSign,
+  TrendingUp,
+  Package2,
+  TrendingDown,
+  FileText,
+  Download,
+} from "lucide-react"
+import Link from "next/link"
 import { toast } from "@/components/ui/use-toast"
 
 // Product type definition
@@ -36,6 +45,8 @@ interface Product {
   basePrice: number
   profitType: "percentage" | "fixed"
   profitValue: number
+  discountType?: "percentage" | "fixed" // Added discount type
+  discountValue?: number // Added discount value
   category: string
   image: string
   sku: string
@@ -47,12 +58,94 @@ interface Product {
   isActive?: boolean
 }
 
+// Form state type definition
+interface ProductFormState {
+  name: string;
+  price: string;
+  basePrice: string;
+  profitType: "percentage" | "fixed";
+  profitValue: string;
+  discountType: "percentage" | "fixed";
+  discountValue: string;
+  category: string;
+  sku: string;
+  stock: string;
+  description: string;
+  supplier: string;
+  image: string;
+  expiryDate: string; // Assuming date input is string
+  isActive: boolean;
+}
+
 // Inserted API response type for product listing
 interface ProductsApiResponse {
   status: 'success' | 'error'
   products: Product[]
   message?: string
 }
+
+// Helper functions for date handling, moved outside the component
+const formatDate = (dateString: string | null | undefined) => {
+  if (!dateString) return null;
+  
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return null;
+    
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return null;
+  }
+};
+
+const isExpired = (dateString: string | null | undefined) => {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  return !isNaN(date.getTime()) && date < new Date();
+};
+
+const isExpiringSoon = (dateString: string | null | undefined) => {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return false;
+  const today = new Date();
+  const sevenDaysFromNow = new Date();
+  sevenDaysFromNow.setDate(today.getDate() + 7);
+  return date > today && date <= sevenDaysFromNow;
+};
+
+// New helper function to get product status, similar to Filament's badgeable column logic
+const getProductStatus = (product: Product) => {
+  if (product.isActive === false) {
+    return {
+      label: "Archived",
+      color: "bg-gray-100 text-gray-600 border-gray-200",
+      priority: 3,
+    };
+  }
+  if (product.expiryDate) {
+    if (isExpired(product.expiryDate)) {
+      return {
+        label: `Expired on ${formatDate(product.expiryDate)}`,
+        color: "bg-red-50 text-red-600 border-red-200",
+        priority: 0,
+      };
+    }
+    if (isExpiringSoon(product.expiryDate)) {
+      return {
+        label: `Expires on ${formatDate(product.expiryDate)}`,
+        color: "bg-amber-50 text-amber-600 border-amber-200",
+        priority: 1,
+      };
+    }
+  }
+  return { label: "Active", color: "bg-green-50 text-green-600 border-green-200", priority: 2 };
+};
 
 export default function AdminInventoryPage() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -71,13 +164,24 @@ export default function AdminInventoryPage() {
   const [error, setError] = useState<string | null>(null)
   const [lowStockCount, setLowStockCount] = useState(0)
   
+  // New state for inventory summary
+  const [inventorySummary, setInventorySummary] = useState({
+    totalValue: 0,
+    totalProfit: 0,
+    totalStock: 0,
+  })
+
   // Form states for Add Product
-  const [newProduct, setNewProduct] = useState({
+  const addFileInputRef = useRef<HTMLInputElement>(null);
+  const [validationErrors, setValidationErrors] = useState<Partial<Record<keyof ProductFormState, string>>>({});
+  const [newProduct, setNewProduct] = useState<ProductFormState>({
     name: "",
     price: "",
     basePrice: "",
     profitType: "percentage",
     profitValue: "",
+    discountType: "percentage", // Added
+    discountValue: "", // Added
     category: "",
     sku: "",
     stock: "",
@@ -89,12 +193,15 @@ export default function AdminInventoryPage() {
   })
   
   // Form states for Edit Product
-  const [editedProduct, setEditedProduct] = useState({
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+  const [editedProduct, setEditedProduct] = useState<ProductFormState>({
     name: "",
     price: "",
     basePrice: "",
     profitType: "percentage",
     profitValue: "",
+    discountType: "percentage", // Added
+    discountValue: "", // Added
     category: "",
     sku: "",
     stock: "",
@@ -133,19 +240,38 @@ export default function AdminInventoryPage() {
   };
   
   // Calculate price based on base price and profit settings
-  const calculatePrice = (basePrice: string, profitType: string, profitValue: string): number => {
+  const calculatePrice = (
+    basePrice: string,
+    profitType: "percentage" | "fixed",
+    profitValue: string,
+    discountType: "percentage" | "fixed", // Added
+    discountValue: string // Added
+  ): number => {
     const basePriceNum = parseFloat(basePrice);
-    const profitValueNum = parseFloat(profitValue);
-    
-    if (isNaN(basePriceNum) || isNaN(profitValueNum)) {
+    const profitValueNum = parseFloat(profitValue) || 0;
+
+    if (isNaN(basePriceNum)) {
       return 0;
     }
-    
+
+    let calculatedPrice;
     if (profitType === "percentage") {
-      return basePriceNum * (1 + profitValueNum / 100);
+      calculatedPrice = basePriceNum * (1 + profitValueNum / 100);
     } else {
-      return basePriceNum + profitValueNum;
+      calculatedPrice = basePriceNum + profitValueNum;
     }
+
+    // Apply discount
+    const discountValueNum = parseFloat(discountValue) || 0;
+    if (discountValueNum > 0) {
+      if (discountType === "percentage") {
+        calculatedPrice *= 1 - discountValueNum / 100;
+      } else {
+        calculatedPrice -= discountValueNum;
+      }
+    }
+
+    return Math.max(0, calculatedPrice); // Ensure price doesn't go below zero
   }
   
   // Handle profit type or value change to recalculate price for new product
@@ -153,7 +279,13 @@ export default function AdminInventoryPage() {
     const newProfitType = type || newProduct.profitType;
     const newProfitValue = value || newProduct.profitValue;
     
-    const calculatedPrice = calculatePrice(newProduct.basePrice, newProfitType, newProfitValue);
+    const calculatedPrice = calculatePrice( // No longer needs explicit cast here
+      newProduct.basePrice,
+      newProfitType as "percentage" | "fixed",
+      newProfitValue,
+      newProduct.discountType,
+      newProduct.discountValue
+    );
     
     setNewProduct({
       ...newProduct,
@@ -166,7 +298,13 @@ export default function AdminInventoryPage() {
   // Handle base price change to recalculate price for new product
   const handleBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { value } = e.target;
-    const calculatedPrice = calculatePrice(value, newProduct.profitType, newProduct.profitValue);
+    const calculatedPrice = calculatePrice(
+      value,
+      newProduct.profitType,
+      newProduct.profitValue,
+      newProduct.discountType,
+      newProduct.discountValue
+    );
     
     setNewProduct({
       ...newProduct,
@@ -175,12 +313,39 @@ export default function AdminInventoryPage() {
     });
   }
   
+  // Handle discount type or value change to recalculate price for new product
+  const handleDiscountChange = (type: string, value: string) => {
+    const newDiscountType = type || newProduct.discountType;
+    const newDiscountValue = value || newProduct.discountValue;
+
+    const calculatedPrice = calculatePrice(
+      newProduct.basePrice,
+      newProduct.profitType,
+      newProduct.profitValue,
+      newDiscountType as "percentage" | "fixed", // Explicitly cast to the union type
+      newDiscountValue
+    );
+
+    setNewProduct({
+      ...newProduct,
+      discountType: newDiscountType as "percentage" | "fixed",
+      discountValue: newDiscountValue,
+      price: calculatedPrice.toFixed(2)
+    });
+  }
+
   // Handle profit type or value change to recalculate price for edited product
   const handleEditProfitChange = (type: string, value: string) => {
-    const newProfitType = type || editedProduct.profitType;
+    const newProfitType = (type || editedProduct.profitType); // No longer needs explicit cast here
     const newProfitValue = value || editedProduct.profitValue;
     
-    const calculatedPrice = calculatePrice(editedProduct.basePrice, newProfitType, newProfitValue);
+    const calculatedPrice = calculatePrice(
+      editedProduct.basePrice,
+      newProfitType as "percentage" | "fixed", // Cast needed here as `type` is string
+      newProfitValue,
+      editedProduct.discountType,
+      editedProduct.discountValue
+    );
     
     setEditedProduct({
       ...editedProduct,
@@ -193,7 +358,13 @@ export default function AdminInventoryPage() {
   // Handle base price change to recalculate price for edited product
   const handleEditBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { value } = e.target;
-    const calculatedPrice = calculatePrice(value, editedProduct.profitType, editedProduct.profitValue);
+    const calculatedPrice = calculatePrice(
+      value,
+      editedProduct.profitType,
+      editedProduct.profitValue,
+      editedProduct.discountType,
+      editedProduct.discountValue
+    );
     
     setEditedProduct({
       ...editedProduct,
@@ -201,7 +372,53 @@ export default function AdminInventoryPage() {
       price: calculatedPrice.toFixed(2)
     });
   }
-  
+    // Helper function to get a numerical priority for sorting statuses
+
+ const getStatusPriority = (product: Product): number => {
+    return getProductStatus(product).priority;
+  };
+
+// Handle discount type or value change to recalculate price for edited product
+  const handleEditDiscountChange = (type: string, value: string) => {
+    const newDiscountType = (type || editedProduct.discountType); // No longer needs explicit cast here
+    const newDiscountValue = value || editedProduct.discountValue;
+
+    const calculatedPrice = calculatePrice(
+      editedProduct.basePrice,
+      editedProduct.profitType,
+      editedProduct.profitValue,
+      newDiscountType as "percentage" | "fixed", // Cast needed here as `type` is string
+      newDiscountValue
+    );
+
+    setEditedProduct({
+      ...editedProduct,
+      discountType: newDiscountType as "percentage" | "fixed",
+      discountValue: newDiscountValue,
+      price: calculatedPrice.toFixed(2)
+    });
+  }
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, isEditing: boolean) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        if (isEditing) {
+          setEditedProduct(prev => ({ ...prev, image: result }));
+        } else {
+          setNewProduct(prev => ({ ...prev, image: result }));
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Reset image when modal closes
+  useEffect(() => {
+    if (!isEditProductModalOpen && selectedProduct) setEditedProduct(prev => ({ ...prev, image: selectedProduct.image }));
+  }, [isEditProductModalOpen, selectedProduct]);
   // Load products on component mount
   useEffect(() => {
     const fetchProducts = async () => {
@@ -223,6 +440,16 @@ export default function AdminInventoryPage() {
           
           // Check for products near expiration
           checkForNearExpiryProducts(data.products)
+
+          // Calculate inventory summary
+          const totalValue = data.products.reduce((sum: number, p: Product) => sum + p.price * p.stock, 0)
+          const totalProfit = data.products.reduce((sum: number, p: Product) => sum + (p.price - p.basePrice) * p.stock, 0)
+          const totalStock = data.products.reduce((sum: number, p: Product) => sum + p.stock, 0)
+          setInventorySummary({
+            totalValue,
+            totalProfit,
+            totalStock,
+          })
         } else {
           setError(data.message || 'Failed to fetch products')
         }
@@ -258,6 +485,14 @@ export default function AdminInventoryPage() {
         case "stock":
           comparison = a.stock - b.stock
           break
+        case "status":
+          const statusA = getStatusPriority(a);
+          const statusB = getStatusPriority(b);
+          comparison = statusA - statusB;
+          break
+        case "category":
+          comparison = a.category.localeCompare(b.category)
+          break
         default:
           comparison = 0
       }
@@ -276,8 +511,10 @@ export default function AdminInventoryPage() {
       name: product.name ?? "",
       price: product.price != null ? product.price.toString() : "",
       basePrice: product.basePrice != null ? product.basePrice.toString() : "",
-      profitType: product.profitType ?? "percentage",
+      profitType: (product.profitType ?? "percentage") as "percentage" | "fixed", // Explicitly cast
       profitValue: product.profitValue != null ? product.profitValue.toString() : "",
+      discountType: (product.discountType ?? "percentage") as "percentage" | "fixed", // Explicitly cast
+      discountValue: product.discountValue != null ? product.discountValue.toString() : "", // Added
       category: product.category ?? "",
       sku: product.sku ?? "",
       stock: product.stock != null ? product.stock.toString() : "",
@@ -303,30 +540,49 @@ export default function AdminInventoryPage() {
     setIsDeleteConfirmOpen(true)
   }
   
+  // Handle generating reports
+  const handleGenerateReport = (format: "csv" | "pdf") => {
+    toast({
+      title: "Generating Report...",
+      description: `Your inventory report is being generated in ${format.toUpperCase()} format.`,
+      variant: "default",
+    })
+    // Placeholder for actual report generation logic
+  }
+
   // Handle add product submission
   const handleAddProduct = async () => {
+    setValidationErrors({});
+    const errors: Partial<Record<keyof ProductFormState, string>> = {};
+
+    if (!newProduct.name.trim()) errors.name = "Product name is required.";
+    if (!newProduct.basePrice.trim() || parseFloat(newProduct.basePrice) <= 0) errors.basePrice = "A valid base price is required.";
+    if (!newProduct.category.trim() || newProduct.category === "new-category") errors.category = "Category is required.";
+    if (!newProduct.sku.trim()) errors.sku = "SKU/Barcode is required.";
+    if (!newProduct.stock.trim() || parseInt(newProduct.stock, 10) < 0) errors.stock = "A valid initial stock is required.";
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all required fields correctly.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
-      // Validate form
-      if (!newProduct.name || !newProduct.price || !newProduct.category || !newProduct.sku) {
-        toast({
-          title: "Missing Required Fields",
-          description: "Please fill in all required fields: name, price, category, and SKU.",
-          variant: "destructive"
-        })
-        return
-      }
-      
       // Validate stock is not negative
       const stockValue = parseInt(newProduct.stock) || 0
       if (stockValue < 0) {
         toast({
           title: "Invalid Stock Value",
           description: "Stock cannot be negative.",
-          variant: "destructive"
+          variant: "destructive",
         })
         return
       }
-      
+
       const response = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -336,6 +592,8 @@ export default function AdminInventoryPage() {
           basePrice: parseFloat(newProduct.basePrice),
           profitType: newProduct.profitType,
           profitValue: parseFloat(newProduct.profitValue),
+          discountType: newProduct.discountType, // Added
+          discountValue: parseFloat(newProduct.discountValue) || 0, // Added
           category: newProduct.category,
           sku: newProduct.sku,
           stock: stockValue,
@@ -361,6 +619,8 @@ export default function AdminInventoryPage() {
           basePrice: "",
           profitType: "percentage",
           profitValue: "",
+          discountType: "percentage", // Added
+          discountValue: "", // Added
           category: "",
           sku: "",
           stock: "",
@@ -369,7 +629,8 @@ export default function AdminInventoryPage() {
           image: "/placeholder.svg",
           expiryDate: "",
           isActive: true
-        })
+        });
+        setValidationErrors({});
         setIsAddProductModalOpen(false)
         
         // Show enhanced success toast
@@ -438,6 +699,8 @@ export default function AdminInventoryPage() {
           basePrice: parseFloat(editedProduct.basePrice),
           profitType: editedProduct.profitType,
           profitValue: parseFloat(editedProduct.profitValue),
+          discountType: editedProduct.discountType, // Added
+          discountValue: parseFloat(editedProduct.discountValue) || 0, // Added
           category: editedProduct.category,
           sku: editedProduct.sku,
           stock: stockValue,
@@ -473,7 +736,15 @@ export default function AdminInventoryPage() {
         
         // Check for products near expiration
         checkForNearExpiryProducts(updatedProducts)
+
+        // Recalculate summary on edit
+        const totalValue = updatedProducts.reduce((sum: number, p: Product) => sum + p.price * p.stock, 0)
+        const totalProfit = updatedProducts.reduce((sum: number, p: Product) => sum + (p.price - p.basePrice) * p.stock, 0)
+        const totalStock = updatedProducts.reduce((sum: number, p: Product) => sum + p.stock, 0)
+        setInventorySummary({ totalValue, totalProfit, totalStock })
       } else {
+
+
         toast({
           title: "Failed to Update Product",
           description: data.message || "An error occurred while updating the product. Please try again.",
@@ -518,6 +789,13 @@ export default function AdminInventoryPage() {
         
         // Update low stock count
         setLowStockCount(updatedProducts.filter(p => p.stock < 10).length)
+
+        // Recalculate summary on delete
+        const totalValue = updatedProducts.reduce((sum, p) => sum + p.price * p.stock, 0)
+        const totalProfit = updatedProducts.reduce((sum, p) => sum + (p.price - p.basePrice) * p.stock, 0)
+        const totalStock = updatedProducts.reduce((sum, p) => sum + p.stock, 0)
+        setInventorySummary({ totalValue, totalProfit, totalStock })
+
       } else {
         toast({
           title: "Failed to Archive Product",
@@ -542,8 +820,10 @@ export default function AdminInventoryPage() {
       name: product.name,
       price: product.price.toString(),
       basePrice: product.basePrice.toString(),
-      profitType: product.profitType,
+      profitType: product.profitType as "percentage" | "fixed", // Explicitly cast
       profitValue: product.profitValue.toString(),
+      discountType: (product.discountType ?? "percentage") as "percentage" | "fixed", // Explicitly cast
+      discountValue: product.discountValue != null ? product.discountValue.toString() : "", // Added
       category: product.category,
       sku: product.sku,
       stock: product.stock.toString(),
@@ -556,48 +836,10 @@ export default function AdminInventoryPage() {
     setIsEditProductModalOpen(true)
   }
 
-  // Enhanced helper function for date formatting
-  const formatDate = (dateString: string | null | undefined) => {
-    if (!dateString) return null;
-    
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) return null;
-      
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return null;
-    }
-  };
-
-  const isExpired = (dateString: string | null | undefined) => {
-    if (!dateString) return false;
-    const date = new Date(dateString);
-    return !isNaN(date.getTime()) && date < new Date();
-  };
-
-  const isExpiringSoon = (dateString: string | null | undefined) => {
-    if (!dateString) return false;
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return false;
-    
-    const today = new Date();
-    const sevenDaysFromNow = new Date();
-    sevenDaysFromNow.setDate(today.getDate() + 7);
-    
-    return date > today && date <= sevenDaysFromNow;
-  };
-
   // Enhanced helper functions for stock status
   const getStockStatus = (stock: number) => {
-    if (stock <= 5) return { color: 'text-red-600', badge: 'Critical', bgColor: 'bg-red-100', indicator: 'bg-red-500' };
-    if (stock < 10) return { color: 'text-red-600', badge: 'Low', bgColor: 'bg-red-100', indicator: 'bg-red-500' };
-    if (stock < 30) return { color: 'text-amber-600', badge: 'Medium', bgColor: 'bg-amber-100', indicator: 'bg-amber-500' };
+    if (stock <= 15) return { color: 'text-red-600', badge: 'Low', bgColor: 'bg-red-100', indicator: 'bg-red-500' };
+
     return { color: 'text-green-600', badge: null, bgColor: 'bg-green-100', indicator: 'bg-green-500' };
   };
 
@@ -665,6 +907,53 @@ export default function AdminInventoryPage() {
             </div>
           </div>
 
+          {/* Inventory Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Total Inventory Value</CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  ₱{inventorySummary.totalValue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <p className="text-xs text-muted-foreground">Estimated value of all products</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Potential Profit</CardTitle>
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  ₱{inventorySummary.totalProfit.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <p className="text-xs text-muted-foreground">Estimated profit from current stock</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Total Stock</CardTitle>
+                <Package2 className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{inventorySummary.totalStock.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Total units of all products</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Reports</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2">
+                <Button variant="outline" size="sm" onClick={() => handleGenerateReport("csv")}><Download className="h-3 w-3 mr-2" /> Export as CSV</Button>
+                <Button variant="outline" size="sm" onClick={() => handleGenerateReport("pdf")}><FileText className="h-3 w-3 mr-2" /> Export as PDF</Button>
+              </CardContent>
+            </Card>
+          </div>
+
           {/* Filters and Search */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="relative">
@@ -700,6 +989,7 @@ export default function AdminInventoryPage() {
                   <SelectItem value="name">Name</SelectItem>
                   <SelectItem value="price">Price</SelectItem>
                   <SelectItem value="stock">Stock</SelectItem>
+                  <SelectItem value="status">Status</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -781,7 +1071,14 @@ export default function AdminInventoryPage() {
                             </Button>
                           </div>
                         </th>
-                        <th className="px-4 py-3 text-left hidden md:table-cell">Status</th>
+                        <th className="px-4 py-3 text-left">
+                          <div className="flex items-center">
+                            Status
+                            <Button variant="ghost" size="sm" className="ml-1 h-6 w-6 p-0" onClick={() => setSortBy("status")}>
+                              <ArrowUpDown className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </th>
                         <th className="px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -832,23 +1129,10 @@ export default function AdminInventoryPage() {
                             </div>
                           </td>
                           <td className="px-4 py-3 hidden md:table-cell">
-                            <div className="flex">
-                              {product.isActive === false && (
-                                <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200">
-                                  Archived
-                                </Badge>
-                              )}
-                              {product.expiryDate && (
-                                <Badge variant="outline" className={`${isExpired(product.expiryDate) ? 'bg-red-50 text-red-600 border-red-200' : 'bg-amber-50 text-amber-600 border-amber-200'} mt-1`}>
-                                  {isExpired(product.expiryDate) ? 'Expired' : `Expires: ${formatDate(product.expiryDate)}`}
-                                </Badge>
-                              )}
-                              {(!product.expiryDate && product.isActive !== false) && (
-                                <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200">
-                                  Active
-                                </Badge>
-                              )}
-                            </div>
+                            <Badge
+                              variant="outline"
+                              className={getProductStatus(product).color}
+                            >{getProductStatus(product).label}</Badge>
                           </td>
                           <td className="px-4 py-3 text-right">
                             <DropdownMenu>
@@ -867,7 +1151,7 @@ export default function AdminInventoryPage() {
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem onClick={() => handleDeleteProduct(product)} className="text-red-600">
-                                  <Trash2 className="h-4 w-4 mr-2" /> {product.isActive === false ? "Delete Permanently" : "Archive Product"}
+                                  <Archive className="h-4 w-4 mr-2" /> {product.isActive === false ? "Delete Permanently" : "Archive Product"}
                                 </DropdownMenuItem>
                                 {product.isActive === false && (
                                   <DropdownMenuItem onClick={() => handleActivateProduct(product)} className="text-green-600">
@@ -905,6 +1189,9 @@ export default function AdminInventoryPage() {
                   value={newProduct.name}
                   onChange={(e) => setNewProduct({...newProduct, name: e.target.value})}
                 />
+                {validationErrors.name && (
+                  <p className="text-xs text-red-600">{validationErrors.name}</p>
+                )}
               </div>
 
               <div className="grid gap-2">
@@ -934,6 +1221,9 @@ export default function AdminInventoryPage() {
                     onChange={(e) => setNewProduct({...newProduct, category: e.target.value})}
                   />
                 )}
+                {validationErrors.category && (
+                  <p className="text-xs text-red-600 mt-1">{validationErrors.category}</p>
+                )}
               </div>
             </div>
 
@@ -947,6 +1237,9 @@ export default function AdminInventoryPage() {
                 step="0.01"
                 min="0"
               />
+              {validationErrors.basePrice && (
+                <p className="text-xs text-red-600">{validationErrors.basePrice}</p>
+              )}
               <p className="text-xs text-gray-500">The price at which the product was purchased from the supplier.</p>
             </div>
 
@@ -982,6 +1275,37 @@ export default function AdminInventoryPage() {
             </div>
 
             <div className="grid gap-2">
+              <label className="text-sm font-medium">Discount</label>
+              <div className="flex gap-2">
+                <Select 
+                  value={newProduct.discountType} 
+                  onValueChange={(value) => handleDiscountChange(value, newProduct.discountValue)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select discount type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">Percentage (%)</SelectItem>
+                    <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input 
+                  type="number" 
+                  placeholder={newProduct.discountType === "percentage" ? "0%" : "₱0.00"} 
+                  value={newProduct.discountValue}
+                  onChange={(e) => handleDiscountChange(newProduct.discountType, e.target.value)}
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              <p className="text-xs text-gray-500">
+                {newProduct.discountType === "percentage" 
+                  ? "Percentage discount applied to the calculated price." 
+                  : "Fixed amount discount applied to the calculated price."}
+              </p>
+            </div>
+
+            <div className="grid gap-2">
               <label className="text-sm font-medium">Selling Price (₱)</label>
               <Input 
                 type="number" 
@@ -1002,6 +1326,9 @@ export default function AdminInventoryPage() {
                   value={newProduct.stock}
                   onChange={(e) => setNewProduct({...newProduct, stock: e.target.value})}
                 />
+                {validationErrors.stock && (
+                  <p className="text-xs text-red-600">{validationErrors.stock}</p>
+                )}
               </div>
 
               <div className="grid gap-2">
@@ -1018,6 +1345,9 @@ export default function AdminInventoryPage() {
                     Scan
                   </Button>
                 </div>
+                {validationErrors.sku && (
+                  <p className="text-xs text-red-600">{validationErrors.sku}</p>
+                )}
               </div>
             </div>
 
@@ -1076,6 +1406,29 @@ export default function AdminInventoryPage() {
 
           {selectedProduct && (
             <div className="grid gap-4">
+              <div 
+                className="relative aspect-video bg-gray-100 rounded-md overflow-hidden cursor-pointer flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-amber-500 transition-colors"
+                onClick={() => editFileInputRef.current?.click()}
+              >
+                <Image
+                  src={editedProduct.image || "/placeholder.svg"}
+                  alt={editedProduct.name || "Product image"}
+                  fill
+                  className="object-cover"
+                  unoptimized
+                />
+                <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                  <p className="text-white font-medium">Change Image</p>
+                </div>
+                <input
+                  type="file"
+                  ref={editFileInputRef}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => handleImageChange(e, true)}
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <label className="text-sm font-medium">Product Name</label>
@@ -1172,6 +1525,37 @@ export default function AdminInventoryPage() {
                   readOnly
                 />
                 <p className="text-xs text-gray-500">Final selling price calculated from base price and profit margin.</p>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Discount</label>
+                <div className="flex gap-2">
+                  <Select 
+                    value={editedProduct.discountType} 
+                    onValueChange={(value) => handleEditDiscountChange(value, editedProduct.discountValue)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select discount type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="percentage">Percentage (%)</SelectItem>
+                      <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input 
+                    type="number" 
+                    placeholder={editedProduct.discountType === "percentage" ? "0%" : "₱0.00"} 
+                    value={editedProduct.discountValue}
+                    onChange={(e) => handleEditDiscountChange(editedProduct.discountType, e.target.value)}
+                    step="0.01"
+                    min="0"
+                  />
+                </div>
+                <p className="text-xs text-gray-500">
+                  {editedProduct.discountType === "percentage" 
+                    ? "Percentage discount applied to the calculated price." 
+                    : "Fixed amount discount applied to the calculated price."}
+                </p>
               </div>
 
               <div className="grid gap-2">
@@ -1367,6 +1751,17 @@ export default function AdminInventoryPage() {
                   <p>{selectedProduct.category}</p>
                 </div>
                 
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Discount</p>
+                  <p className="text-lg font-medium">
+                    {selectedProduct.discountValue && selectedProduct.discountValue > 0
+                      ? `${selectedProduct.discountValue}${selectedProduct.discountType === "percentage" ? "%" : "₱"}`
+                      : "No Discount"}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm font-medium text-gray-500">Supplier</p>
                   <p>{selectedProduct.supplier || "Not specified"}</p>

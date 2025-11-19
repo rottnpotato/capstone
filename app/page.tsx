@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
+import Image from "next/image"
 import {
   BarChart2,
   ChevronRight,
@@ -70,9 +71,13 @@ export default function Home() {
       >
         <div className="container flex h-16 items-center justify-between min-w-screen">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center">
-              <CreditCard className="h-4 w-4 text-white" />
-            </div>
+            <Image 
+              src="/pandol-logo.png" 
+              alt="Pandol Cooperative Logo" 
+              width={60} 
+              height={60} 
+              className="rounded-full"
+            />
             <span className="text-xl font-bold text-gray-900">Pandol Multi-Purpose Cooperative Management System</span>
           </div> 
           <nav className="hidden md:flex items-center space-x-6">
@@ -297,7 +302,13 @@ export default function Home() {
                     "Secure Transactions",
                   ].map((value, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <div className="h-4 w-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500"></div>
+                      <Image 
+                        src="/pandol-logo.png" 
+                        alt="Pandol Cooperative Logo" 
+                        width={16} 
+                        height={16} 
+                        className="rounded-full"
+                      />
                       <span className="text-gray-700">{value}</span>
                     </div>
                   ))}
@@ -503,19 +514,37 @@ export default function Home() {
                   href="#"
                   className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
                 >
-                  <Facebook className="h-5 w-5 text-white" />
+                  <Image 
+                    src="/pandol-logo.png" 
+                    alt="Pandol Cooperative Logo" 
+                    width={20} 
+                    height={20} 
+                    className="rounded-full"
+                  />
                 </a>
                 <a
                   href="#"
                   className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
                 >
-                  <Twitter className="h-5 w-5 text-white" />
+                  <Image 
+                    src="/pandol-logo.png" 
+                    alt="Pandol Cooperative Logo" 
+                    width={20} 
+                    height={20} 
+                    className="rounded-full"
+                  />
                 </a>
                 <a
                   href="#"
                   className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
                 >
-                  <Instagram className="h-5 w-5 text-white" />
+                  <Image 
+                    src="/pandol-logo.png" 
+                    alt="Pandol Cooperative Logo" 
+                    width={20} 
+                    height={20} 
+                    className="rounded-full"
+                  />
                 </a>
               </div>
             </motion.div>
@@ -604,19 +633,37 @@ export default function Home() {
                     href="#"
                     className="h-10 w-10 rounded-full bg-amber-600 flex items-center justify-center hover:bg-amber-500 transition-colors"
                   >
-                    <Facebook className="h-5 w-5 text-white" />
+                    <Image 
+                      src="/pandol-logo.png" 
+                      alt="Pandol Cooperative Logo" 
+                      width={20} 
+                      height={20} 
+                      className="rounded-full"
+                    />
                   </a>
                   <a
                     href="#"
                     className="h-10 w-10 rounded-full bg-amber-600 flex items-center justify-center hover:bg-amber-500 transition-colors"
                   >
-                    <Twitter className="h-5 w-5 text-white" />
+                    <Image 
+                      src="/pandol-logo.png" 
+                      alt="Pandol Cooperative Logo" 
+                      width={20} 
+                      height={20} 
+                      className="rounded-full"
+                    />
                   </a>
                   <a
                     href="#"
                     className="h-10 w-10 rounded-full bg-amber-600 flex items-center justify-center hover:bg-amber-500 transition-colors"
                   >
-                    <Instagram className="h-5 w-5 text-white" />
+                    <Image 
+                      src="/pandol-logo.png" 
+                      alt="Pandol Cooperative Logo" 
+                      width={20} 
+                      height={20} 
+                      className="rounded-full"
+                    />
                   </a>
                 </div>
               </div>

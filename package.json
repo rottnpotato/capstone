@@ -1,5 +1,5 @@
 {
-  "name": "PMCSMS",
+  "name": "pmcsms",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,12 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:generate": "dotenv -e .env.local -- drizzle-kit generate",
-    "db:migrate": "dotenv -e .env.local -- tsx db/migrate.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
     "db:seed": "dotenv -e .env.local -- tsx db/seed.ts",
     "db:seed-admin": "dotenv -e .env.local -- tsx db/admin-seed.ts",
-    "db:push": "dotenv -e .env.local -- drizzle-kit push",
-    "db:studio": "dotenv -e .env.local -- drizzle-kit studio"
+    "db:push": "drizzle-kit push",
+    "db:studio": "tsx drizzle-kit studio"
+
+
   },
   "dependencies": {
     "@emotion/is-prop-valid": "latest",

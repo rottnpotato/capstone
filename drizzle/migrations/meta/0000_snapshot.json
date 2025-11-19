@@ -1,5 +1,5 @@
 {
-  "id": "95b90cf7-f3f2-4b66-b425-915fd3646341",
+  "id": "4d6df1fa-31b5-4a69-bcb1-5dc62edc5438",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -149,6 +149,155 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.Events": {
+      "name": "Events",
+      "schema": "",
+      "columns": {
+        "EventId": {
+          "name": "EventId",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "Title": {
+          "name": "Title",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "Description": {
+          "name": "Description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "EventDate": {
+          "name": "EventDate",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "Type": {
+          "name": "Type",
+          "type": "EventType",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "CreatedAt": {
+          "name": "CreatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "UpdatedAt": {
+          "name": "UpdatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.MemberActivities": {
+      "name": "MemberActivities",
+      "schema": "",
+      "columns": {
+        "ActivityId": {
+          "name": "ActivityId",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "MemberId": {
+          "name": "MemberId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "Action": {
+          "name": "Action",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "Amount": {
+          "name": "Amount",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "Timestamp": {
+          "name": "Timestamp",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "RelatedTransactionId": {
+          "name": "RelatedTransactionId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "CreatedAt": {
+          "name": "CreatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "UpdatedAt": {
+          "name": "UpdatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "MemberActivities_MemberId_Members_MemberId_fk": {
+          "name": "MemberActivities_MemberId_Members_MemberId_fk",
+          "tableFrom": "MemberActivities",
+          "tableTo": "Members",
+          "columnsFrom": [
+            "MemberId"
+          ],
+          "columnsTo": [
+            "MemberId"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "MemberActivities_RelatedTransactionId_Transactions_TransactionId_fk": {
+          "name": "MemberActivities_RelatedTransactionId_Transactions_TransactionId_fk",
+          "tableFrom": "MemberActivities",
+          "tableTo": "Transactions",
+          "columnsFrom": [
+            "RelatedTransactionId"
+          ],
+          "columnsTo": [
+            "TransactionId"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.Members": {
       "name": "Members",
       "schema": "",
@@ -190,6 +339,19 @@
           "notNull": true,
           "default": "'0.00'"
         },
+        "CreditLimit": {
+          "name": "CreditLimit",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0.00'"
+        },
+        "UserId": {
+          "name": "UserId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "CreatedAt": {
           "name": "CreatedAt",
           "type": "timestamp with time zone",
@@ -206,7 +368,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "Members_UserId_Users_UserId_fk": {
+          "name": "Members_UserId_Users_UserId_fk",
+          "tableFrom": "Members",
+          "tableTo": "Users",
+          "columnsFrom": [
+            "UserId"
+          ],
+          "columnsTo": [
+            "UserId"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "Members_Email_unique": {
@@ -255,6 +431,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "BasePrice": {
+          "name": "BasePrice",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0.00'"
+        },
         "StockQuantity": {
           "name": "StockQuantity",
           "type": "integer",
@@ -267,6 +450,31 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "Image": {
+          "name": "Image",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "Supplier": {
+          "name": "Supplier",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ExpiryDate": {
+          "name": "ExpiryDate",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "IsActive": {
+          "name": "IsActive",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "CreatedAt": {
           "name": "CreatedAt",
@@ -399,6 +607,20 @@
           "type": "numeric(10, 2)",
           "primaryKey": false,
           "notNull": true
+        },
+        "BasePriceAtTimeOfSale": {
+          "name": "BasePriceAtTimeOfSale",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0.00'"
+        },
+        "Profit": {
+          "name": "Profit",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0.00'"
         },
         "CreatedAt": {
           "name": "CreatedAt",
@@ -619,6 +841,103 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.VerificationTokens": {
+      "name": "VerificationTokens",
+      "schema": "",
+      "columns": {
+        "TokenId": {
+          "name": "TokenId",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "Token": {
+          "name": "Token",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "Type": {
+          "name": "Type",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "MemberId": {
+          "name": "MemberId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "UserId": {
+          "name": "UserId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ExpiresAt": {
+          "name": "ExpiresAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "CreatedAt": {
+          "name": "CreatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "UsedAt": {
+          "name": "UsedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "VerificationTokens_MemberId_Members_MemberId_fk": {
+          "name": "VerificationTokens_MemberId_Members_MemberId_fk",
+          "tableFrom": "VerificationTokens",
+          "tableTo": "Members",
+          "columnsFrom": [
+            "MemberId"
+          ],
+          "columnsTo": [
+            "MemberId"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "VerificationTokens_UserId_Users_UserId_fk": {
+          "name": "VerificationTokens_UserId_Users_UserId_fk",
+          "tableFrom": "VerificationTokens",
+          "tableTo": "Users",
+          "columnsFrom": [
+            "UserId"
+          ],
+          "columnsTo": [
+            "UserId"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "VerificationTokens_Token_unique": {
+          "name": "VerificationTokens_Token_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "Token"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -629,6 +948,15 @@
         "Earned",
         "Spent",
         "Adjustment"
+      ]
+    },
+    "public.EventType": {
+      "name": "EventType",
+      "schema": "public",
+      "values": [
+        "Operation",
+        "Community",
+        "Management"
       ]
     }
   },

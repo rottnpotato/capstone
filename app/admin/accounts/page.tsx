@@ -1,8 +1,8 @@
 "use client"
 
-import type React from "react"
+import type React from "react";
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { motion } from "framer-motion"
 import { User, Users, X, CheckCircle2, Search, UserPlus, Mail, Key, BadgeCheck, AlertTriangle, RefreshCw } from "lucide-react"
 import { Navbar } from "@/components/ui/navbar"
@@ -12,6 +12,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -21,7 +28,7 @@ interface User {
   Name: string
   Email: string
   RoleId: number
-  RoleName: string
+  RoleName: 'admin' | 'cashier' | 'Member' | 'Administrator' | 'Manager'
   CreatedAt: string
   UpdatedAt: string
 }
@@ -44,6 +51,10 @@ export default function AccountsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [successMessage, setSuccessMessage] = useState("The account has been created successfully.")
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [editFormData, setEditFormData] = useState({ Name: "", Email: "", RoleId: 0, status: "active" });
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   // State for filtering and searching
@@ -282,6 +293,11 @@ export default function AccountsPage() {
   }
   };
 
+  const handleEditRoleChange = (value: string) => {
+    const roleId = parseInt(value);
+    setEditFormData((prev) => ({ ...prev, RoleId: roleId }));
+  };
+
   // Validate form
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -406,6 +422,107 @@ export default function AccountsPage() {
       } finally {
         setIsSubmitting(false);
       }
+    }
+  };
+
+  const openEditModal = (user: User) => {
+    setSelectedUser(user);
+    setEditFormData({
+      Name: user.Name,
+      Email: user.Email,
+      RoleId: user.RoleId,
+      // @ts-ignore
+      status: user.status || 'active',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser) return;
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`/api/users/${selectedUser.UserId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editFormData.Name,
+          email: editFormData.Email,
+          role: getRoleNameById(editFormData.RoleId),
+          RoleId: editFormData.RoleId,
+          status: editFormData.status,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setShowEditModal(false);
+        fetchUsers(); // Refresh the user list
+        setSuccessMessage(`Account for ${editFormData.Name} has been updated successfully.`);
+        setShowSuccessModal(true);
+      } else {
+        setErrors({ apiError: data.message || 'Failed to update account' });
+      }
+    } catch (error) {
+      console.error('Error updating account:', error);
+      setErrors({ apiError: 'An error occurred while updating the account.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openDeactivateModal = (user: User) => {
+    setSelectedUser(user);
+    setShowDeactivateModal(true);
+  };
+
+  const handleDeactivateConfirm = async () => {
+    if (!selectedUser) return;
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`/api/users/${selectedUser.UserId}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setShowDeactivateModal(false);
+        fetchUsers(); // Refresh the user list
+        setSuccessMessage(`Account for ${selectedUser.Name} has been deactivated.`);
+        setShowSuccessModal(true);
+      } else {
+        // Handle error in UI
+        console.error(data.message);
+      }
+    } catch (error) {
+      console.error('Error deactivating account:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReactivate = async (user: User) => {
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`/api/users/${user.UserId}`, {
+        method: 'PATCH',
+      });
+      const data = await response.json();
+      if (data.success) {
+        fetchUsers();
+        setSuccessMessage(`Account for ${user.Name} has been reactivated.`);
+        setShowSuccessModal(true);
+      } else {
+        console.error(data.message);
+      }
+    } catch (error) {
+      console.error('Error reactivating account:', error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -587,30 +704,37 @@ export default function AccountsPage() {
                           <td className="py-3 px-4">{user.Email}</td>
                           <td className="py-3 px-4">
                             <span
-                              className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                                user.RoleName.toLowerCase() === "member"
+                              className={`inline-block px-2 py-1 rounded-full text-xs font-medium capitalize ${
+                                // @ts-ignore
+                                user.status === 'inactive'
+                                  ? 'bg-gray-200 text-gray-800'
+                                  : user.RoleName.toLowerCase() === "member"
                                   ? "bg-emerald-100 text-emerald-800"
                                   : user.RoleName.toLowerCase() === "cashier"
                                   ? "bg-blue-100 text-blue-800"
                                   : "bg-amber-100 text-amber-800"
                               }`}
                             >
-                              {user.RoleName}
+                              {/* @ts-ignore */}
+                              {user.status === 'inactive' ? 'Inactive' : user.RoleName}
                             </span>
                           </td>
                           <td className="py-3 px-4">{formatDate(user.CreatedAt)}</td>
                           <td className="py-3 px-4">
                             <div className="flex gap-2">
-                              <Button variant="outline" size="sm" className="h-8">
+                              <Button variant="outline" size="sm" className="h-8" onClick={() => openEditModal(user)}>
                                 Edit
                               </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 text-red-600 border-red-200 hover:bg-red-50"
-                              >
-                                Deactivate
-                              </Button>
+                              {/* @ts-ignore */}
+                              {user.status !== 'inactive' ? (
+                                <Button variant="outline" size="sm" className="h-8 text-red-600 border-red-200 hover:bg-red-50" onClick={() => openDeactivateModal(user)}>
+                                  Deactivate
+                                </Button>
+                              ) : (
+                                <Button variant="outline" size="sm" className="h-8 text-green-600 border-green-200 hover:bg-green-50" onClick={() => handleReactivate(user)}>
+                                  Reactivate
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -841,6 +965,108 @@ export default function AccountsPage() {
             </form>
           </motion.div>
         </div>
+      )}
+
+      {/* Edit Account Modal */}
+      {showEditModal && selectedUser && (
+        <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Account</DialogTitle>
+              <DialogDescription>Update details for {selectedUser.Name}</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleEditSubmit}>
+              {errors.apiError && (
+                <Alert className="mb-4 border-red-200 bg-red-50">
+                  <AlertTriangle className="h-4 w-4 text-red-600 mr-2" />
+                  <AlertDescription className="text-red-600">{errors.apiError}</AlertDescription>
+                </Alert>
+              )}
+              <div className="space-y-4 mb-6">
+                <div>
+                  <Label htmlFor="EditName">Full Name</Label>
+                  <Input
+                    id="EditName"
+                    name="Name"
+                    value={editFormData.Name}
+                    onChange={(e) => setEditFormData({ ...editFormData, Name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="EditEmail">Email Address</Label>
+                  <Input
+                    id="EditEmail"
+                    name="Email"
+                    type="email"
+                    value={editFormData.Email}
+                    onChange={(e) => setEditFormData({ ...editFormData, Email: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="EditRoleId">Account Type</Label>
+                  <Select
+                    value={editFormData.RoleId.toString()}
+                    onValueChange={handleEditRoleChange}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select account type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {roles.filter(role => role.Name === "Member" || role.Name === "Cashier").map((role) => (
+                        <SelectItem key={role.RoleId} value={role.RoleId.toString()}>
+                          {role.Name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="EditStatus">Status</Label>
+                  <Select
+                    value={editFormData.status}
+                    onValueChange={(value) => setEditFormData({ ...editFormData, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" type="button" onClick={() => setShowEditModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? <Spinner className="mr-2" /> : 'Save Changes'}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Deactivate Confirmation Modal */}
+      {showDeactivateModal && selectedUser && (
+        <Dialog open={showDeactivateModal} onOpenChange={setShowDeactivateModal}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Deactivate Account</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to deactivate the account for {selectedUser.Name}?
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setShowDeactivateModal(false)}>Cancel</Button>
+              <Button variant="destructive" onClick={handleDeactivateConfirm} disabled={isSubmitting}>
+                {isSubmitting ? <Spinner className="mr-2" /> : 'Deactivate'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Success Modal */}

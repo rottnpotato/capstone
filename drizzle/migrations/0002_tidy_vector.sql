@@ -1,0 +1,2 @@
+ALTER TABLE "Transactions" ADD COLUMN "ManualDiscountAmount" numeric(10, 2) DEFAULT '0.00';--> statement-breakpoint
+ALTER TABLE "MemberActivities" ADD CONSTRAINT "member_activity_transaction_fk" FOREIGN KEY ("RelatedTransactionId") REFERENCES "public"."Transactions"("TransactionId") ON DELETE no action ON UPDATE no action;

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react"
 import { motion } from "framer-motion"
+import Image from "next/image"
 import { User, Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -9,88 +10,31 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
+import { useActionState } from 'react'
+import { useFormStatus } from 'react-dom'
+import { LoginUser } from './actions'
+
+function LoginButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <Button type="submit" className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600" aria-disabled={pending}>
+      {pending ? "Logging in..." : "Login"}
+    </Button>
+  );
+}
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [state, formAction] = useActionState(LoginUser, undefined);
 
-  // Get the 'from' parameter (the page the user was trying to access)
-  const from = searchParams.get('from') || '/';
-
-  // Check if the user is already logged in, redirect if so
   useEffect(() => {
-    const checkAuthStatus = async () => {
-      try {
-        const response = await fetch('/api/auth/me');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.user) {
-            // Redirect based on role
-            const role = data.user.RoleName;
-            let redirectTo = '/';
-            
-            if (role === 'Administrator' || role === 'Manager') {
-              redirectTo = '/admin';
-            } else if (role === 'Cashier') {
-              redirectTo = '/pos';
-            } else if (role === 'Member') {
-              redirectTo = '/members';
-            }
-            
-            router.push(redirectTo);
-          }
-        }
-      } catch (error) {
-        console.error("Error checking auth status:", error);
-      }
-    };
-    
-    checkAuthStatus();
-  }, [router]);
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.message || "Login failed. Please check your credentials.");
-        setIsLoading(false);
-        return;
-      }
-
-      // Login successful - redirect to appropriate page based on role
-      if (data.redirectUrl) {
-        router.push(data.redirectUrl);
-      } else {
-        // If no specific redirect URL is provided, use the 'from' parameter or default to home
-        router.push(from !== '/login' ? from : '/');
-      }
-    } catch (err) {
-      console.error("Login error:", err);
-      setError("Failed to connect to the server. Please try again later.");
-      setIsLoading(false);
+    if (state?.success && state.redirectUrl) {
+      router.push(state.redirectUrl);
     }
-  };
+  }, [state, router]);
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
@@ -101,9 +45,13 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-8">
-            <div className="h-10 w-10 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center">
-              <span className="text-white font-bold">PC</span>
-            </div>
+            <Image 
+              src="/pandol-logo.png" 
+              alt="Pandol Cooperative Logo" 
+              width={40} 
+              height={40} 
+              className="rounded-full"
+            />
             <span className="text-2xl font-bold text-gray-900">Pandol Cooperative</span>
           </Link>
 
@@ -115,18 +63,22 @@ export default function LoginPage() {
           <Card>
             <CardContent className="pt-6">
               <div className="mb-6 text-center">
-                <div className="h-16 w-16 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 mx-auto mb-4 flex items-center justify-center">
-                  <User className="h-8 w-8 text-white" />
-                </div>
+                <Image 
+                  src="/pandol-logo.png" 
+                  alt="Pandol Cooperative Logo" 
+                  width={64} 
+                  height={64} 
+                  className="mx-auto mb-4"
+                />
               </div>
 
-              {error && (
+              {state && !state.success && (
                 <Alert variant="destructive" className="mb-4">
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertDescription>{state.message}</AlertDescription>
                 </Alert>
               )}
 
-              <form onSubmit={handleLogin} className="space-y-4">
+              <form action={formAction} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <Input
@@ -134,9 +86,6 @@ export default function LoginPage() {
                     name="email"
                     type="email"
                     placeholder="Enter your email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    disabled={isLoading}
                     required
                   />
                 </div>
@@ -148,9 +97,6 @@ export default function LoginPage() {
                       name="password"
                       type={showPassword ? "text" : "password"}
                       placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={isLoading}
                       required
                       className="pr-10"
                     />
@@ -174,13 +120,7 @@ export default function LoginPage() {
                   </div>
                   {/* Forgot password link (requires logic) */}
                 </div>
-                <Button
-                  type="submit"
-                  className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
-                  disabled={isLoading}
-                >
-                  {isLoading ? "Logging in..." : "Login"}
-                </Button>
+                <LoginButton />
               </form>
 
               <div className="mt-6 text-center">

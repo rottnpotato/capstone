@@ -5,29 +5,22 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1746261116073,
-      "tag": "0000_keen_silverclaw",
+      "when": 1761404599640,
+      "tag": "0000_spicy_steel_serpent",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1696687290012,
-      "tag": "0001_add_image_supplier_columns",
+      "when": 1761447018055,
+      "tag": "0001_mute_living_tribunal",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1746346200000,
-      "tag": "0002_add_user_id_to_members",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1716953895034,
-      "tag": "0003_add_expiry_active_to_products",
+      "when": 1761700333789,
+      "tag": "0002_tidy_vector",
       "breakpoints": true
     }
   ]

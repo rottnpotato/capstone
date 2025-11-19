@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import Image from "next/image"
 
 // Define TypeScript interfaces for our data
 interface ItemDetail {
@@ -243,12 +244,13 @@ export default function MemberDashboard() {
             >
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="flex items-center gap-4">
-                  <div className="h-16 w-16 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center text-white text-xl font-bold">
-                    {memberData.name
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
-                  </div>
+                  <Image 
+                    src="/pandol-logo.png" 
+                    alt="Pandol Cooperative Logo" 
+                    width={64} 
+                    height={64} 
+                    className="rounded-full"
+                  />
                   <div>
                     <h1 className="text-2xl font-bold text-gray-900">{memberData.name}</h1>
                     <div className="flex items-center gap-2 text-gray-600">

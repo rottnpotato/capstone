@@ -1,24 +1,27 @@
 'use server'
 
-import { db } from '@/db/connection';
+import { db } from '@/db/connection'; // Assuming this is the correct db import
+import { MemberRepository, JoinedMemberResult } from '@/db/repositories'; // Import JoinedMemberResult
 import { ProductRepository } from '@/db/repositories/ProductRepository';
-import { MemberRepository } from '@/db/repositories/MemberRepository';
 import { TransactionRepository } from '@/db/repositories/TransactionRepository';
-import { Products, Members, Categories } from '@/db/schema';
+import { Products, Members, Categories, Users } from '@/db/schema';
 import { eq, like, or, and } from 'drizzle-orm';
 import { SendPurchaseNotification } from '@/lib/notifications';
 
+import { GetCurrentSession } from '@/lib/auth';
 // Product interfaces
 export interface Product {
   Id: string;
   Name: string;
   Price: number;
+  basePrice: number;
   Category: string;
   Image: string;
   Barcode: string;
   Stock: number;
   Description: string;
-  Discount?: number;
+  discountType?: "percentage" | "fixed"; // Added
+  discountValue?: number; // Added
   ExpiryDate?: string | null;
   IsActive?: boolean;
 }
@@ -32,12 +35,13 @@ export interface Member {
   CreditLimit: number;
   CurrentCredit: number;
 }
-
 // Transaction interfaces
 export interface TransactionItem {
   Name: string;
   Quantity: number;
   Price: number;
+  basePrice: number;
+  OriginalPrice: number;
 }
 
 export interface Transaction {
@@ -45,6 +49,9 @@ export interface Transaction {
   Date: string;
   Time: string;
   Items: number;
+  MemberEmail?: string;
+  ManualDiscountAmount?: number;
+  DiscountAmount?: number; // Added discount amount
   Total: number;
   PaymentMethod: string;
   Status: string;
@@ -54,117 +61,67 @@ export interface Transaction {
   ItemDetails: TransactionItem[];
 }
 
-// Get all products
-export async function GetProducts(): Promise<Product[]> {
+async function fetchAndMapProducts(whereClause?: any): Promise<Product[]> {
   try {
     const productsData = await db.select()
       .from(Products)
       .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
-      .where(eq(Products.IsActive, true)); // Only get active products
-    
+      .where(whereClause);
+
     return productsData.map((product: any) => ({
       Id: product.Products.ProductId.toString(),
       Name: product.Products.Name,
       Price: parseFloat(product.Products.Price),
+      basePrice: parseFloat(product.Products.BasePrice || '0'),
       Category: product.Categories?.Name?.toLowerCase() || "uncategorized",
       Image: product.Products.Image || "",
       Barcode: product.Products.Sku,
       Stock: product.Products.StockQuantity,
       Description: product.Products.Description || "",
+      discountType: product.Products.DiscountType as "percentage" | "fixed" | undefined,
+      discountValue: parseFloat(product.Products.DiscountValue || '0'),
       ExpiryDate: product.Products.ExpiryDate ? new Date(product.Products.ExpiryDate).toISOString() : null,
       IsActive: product.Products.IsActive
     }));
   } catch (error) {
-    console.error("Error fetching products:", error);
+    console.error("Error fetching and mapping products:", error);
     return [];
   }
+}
+
+// Get all active products
+export async function getProducts(): Promise<Product[]> {
+  return fetchAndMapProducts(eq(Products.IsActive, true));
 }
 
 // Get products by category
-export async function GetProductsByCategory(categoryName: string): Promise<Product[]> {
-  try {
-    // Handle "all" category
-    if (categoryName === "all") {
-      return GetProducts();
-    }
-    
-    // First get the category id
-    const categoryResults = await db.select()
-      .from(Categories)
-      .where(eq(Categories.Name, categoryName));
-    
-    if (categoryResults.length === 0) {
-      return [];
-    }
-    
-    const categoryId = categoryResults[0].CategoryId;
-    
-    // Now get products by category id
-    const productsData = await db.select()
-      .from(Products)
-      .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
-      .where(
-        and(
-          eq(Products.CategoryId, categoryId),
-          eq(Products.IsActive, true)
-        )
-      );
-    
-    return productsData.map((product: any) => ({
-      Id: product.Products.ProductId.toString(),
-      Name: product.Products.Name,
-      Price: parseFloat(product.Products.Price),
-      Category: product.Categories?.Name?.toLowerCase() || "uncategorized",
-      Image: product.Products.Image || "",
-      Barcode: product.Products.Sku,
-      Stock: product.Products.StockQuantity,
-      Description: product.Products.Description || "",
-      ExpiryDate: product.Products.ExpiryDate ? new Date(product.Products.ExpiryDate).toISOString() : null,
-      IsActive: product.Products.IsActive
-    }));
-  } catch (error) {
-    console.error(`Error fetching products for category ${categoryName}:`, error);
-    return [];
+export async function getProductsByCategory(categoryName: string): Promise<Product[]> {
+  if (categoryName === "all") {
+    return getProducts();
   }
+
+  const whereClause = and(
+    eq(Categories.Name, categoryName),
+    eq(Products.IsActive, true)
+  );
+  return fetchAndMapProducts(whereClause);
 }
 
 // Search products
-export async function SearchProducts(searchQuery: string): Promise<Product[]> {
-  try {
-    const productsData = await db.select()
-      .from(Products)
-      .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
-      .where(
-        and(
-          or(
-            like(Products.Name, `%${searchQuery}%`),
-            like(Products.Sku, `%${searchQuery}%`),
-            like(Products.Description || "", `%${searchQuery}%`)
-          ),
-          eq(Products.IsActive, true)
-        )
-      );
-    
-    return productsData.map((product: any) => ({
-      Id: product.Products.ProductId.toString(),
-      Name: product.Products.Name,
-      Price: parseFloat(product.Products.Price),
-      Category: product.Categories?.Name?.toLowerCase() || "uncategorized",
-      Image: product.Products.Image || "",
-      Barcode: product.Products.Sku,
-      Stock: product.Products.StockQuantity,
-      Description: product.Products.Description || "",
-      ExpiryDate: product.Products.ExpiryDate ? new Date(product.Products.ExpiryDate).toISOString() : null,
-      IsActive: product.Products.IsActive
-    }));
-  } catch (error) {
-    console.error(`Error searching products with query ${searchQuery}:`, error);
-    return [];
-  }
+export async function searchProducts(searchQuery: string): Promise<Product[]> {
+  const whereClause = and(
+    or(
+      like(Products.Name, `%${searchQuery}%`),
+      like(Products.Sku, `%${searchQuery}%`),
+      like(Products.Description, `%${searchQuery}%`)
+    ),
+    eq(Products.IsActive, true)
+  );
+  return fetchAndMapProducts(whereClause);
 }
 
 // Get all categories
-export async function GetCategories(): Promise<string[]> {
+export async function getCategories(): Promise<string[]> {
   try {
     const categoriesData = await db.select().from(Categories);
     return categoriesData.map(category => category.Name.toLowerCase());
@@ -175,11 +132,11 @@ export async function GetCategories(): Promise<string[]> {
 }
 
 // Get all members
-export async function GetMembers(): Promise<Member[]> {
+export async function getMembers(): Promise<Member[]> {
   try {
-    const membersData = await MemberRepository.GetAll();
+    const membersData: JoinedMemberResult[] = await MemberRepository.GetAll();
     
-    return membersData.map(member => ({
+    return membersData.map((member: JoinedMemberResult) => ({
       Id: member.MemberId.toString(),
       Name: member.Name,
       MemberId: `M${member.MemberId.toString().padStart(3, '0')}`, // Format to match mock data
@@ -194,14 +151,15 @@ export async function GetMembers(): Promise<Member[]> {
 }
 
 // Search members
-export async function SearchMembers(searchQuery: string): Promise<Member[]> {
+export async function searchMembers(searchQuery: string): Promise<Member[]> {
   try {
     const membersData = await db.select()
       .from(Members)
       .where(
         or(
           like(Members.Name, `%${searchQuery}%`),
-          like(Members.Email, `%${searchQuery}%`)
+          like(Members.Email, `%${searchQuery}%`),
+          like(Members.MemberId, `%${searchQuery.replace(/^M0*/, '')}%`) // Allow searching by formatted MemberId
         )
       );
     
@@ -220,47 +178,64 @@ export async function SearchMembers(searchQuery: string): Promise<Member[]> {
 }
 
 // Get transactions
-export async function GetTransactions(): Promise<Transaction[]> {
+export async function getTransactions(): Promise<Transaction[]> {
   try {
-    const transactionsData = await TransactionRepository.GetAll();
-    
-    const transactions: Transaction[] = [];
-    
-    for (const transaction of transactionsData) {
-      // Get transaction items
-      const itemsData = await TransactionRepository.GetItemsByTransactionId(transaction.Transactions.TransactionId);
-      
+    // Fetch all transactions with their related items, products, members, and users in one go.
+    const transactionsData = await db.query.Transactions.findMany({
+      with: {
+        TransactionItems: {
+          with: {
+            Product: true,
+          },
+        },
+        Member: true,
+        User: true,
+      },
+      orderBy: (transactions, { desc }) => [desc(transactions.Timestamp)],
+    });
+
+    return transactionsData.map(transaction => {
       // Format date and time
-      const timestamp = transaction.Transactions.Timestamp;
+      const timestamp = transaction.Timestamp;
       const date = timestamp.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
       const time = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-      
+
       // Calculate total items
-      const totalItems = itemsData.reduce((sum, item) => sum + item.TransactionItems.Quantity, 0);
-      
+      const totalItems = transaction.TransactionItems.reduce((sum, item) => sum + item.Quantity, 0);
+
       // Format transaction items for details
-      const itemDetails = itemsData.map(item => ({
-        Name: item.Products?.Name || "Unknown Product",
-        Quantity: item.TransactionItems.Quantity,
-        Price: parseFloat(item.TransactionItems.PriceAtTimeOfSale),
+      const itemDetails = transaction.TransactionItems.map(item => ({
+        Name: item.Product?.Name || "Unknown Product",
+        Quantity: item.Quantity,
+        Price: parseFloat(item.PriceAtTimeOfSale),
+        basePrice: parseFloat(item.BasePriceAtTimeOfSale || '0'),
+        OriginalPrice: parseFloat(item.Product?.Price || '0'),
       }));
-      
-      transactions.push({
-        Id: `TRX-${transaction.Transactions.TransactionId}`,
+
+      // Calculate total discount
+      const totalDiscount = transaction.TransactionItems.reduce((sum, item) => {
+        const originalPrice = parseFloat(item.Product?.Price || '0');
+        const salePrice = parseFloat(item.PriceAtTimeOfSale);
+        return sum + (originalPrice - salePrice) * item.Quantity;
+      }, 0);
+
+      return {
+        Id: `TRX-${transaction.TransactionId}`,
         Date: date,
         Time: time,
         Items: totalItems,
-        Total: parseFloat(transaction.Transactions.TotalAmount),
-        PaymentMethod: transaction.Transactions.PaymentMethod || "cash",
-        Status: (transaction.Transactions.PaymentMethod || "").toLowerCase() === "credit" ? "Credit" : "Completed",
-        Member: transaction.Members?.Name,
-        MemberId: transaction.Members ? `M${transaction.Members.MemberId.toString().padStart(3, '0')}` : undefined,
-        Cashier: transaction.Users?.Name || "Unknown Cashier",
+        Total: parseFloat(transaction.TotalAmount),
+        PaymentMethod: transaction.PaymentMethod || "cash",
+        ManualDiscountAmount: parseFloat(transaction.ManualDiscountAmount || "0"),
+        DiscountAmount: totalDiscount,
+        Status: (transaction.PaymentMethod || "").toLowerCase() === "credit" ? "Credit" : "Completed",
+        Member: transaction.Member?.Name,
+        MemberId: transaction.Member ? `M${transaction.Member.MemberId.toString().padStart(3, '0')}` : undefined,
+        MemberEmail: transaction.Member?.Email,
+        Cashier: transaction.User?.Name || "Unknown Cashier",
         ItemDetails: itemDetails,
-      });
-    }
-    
-    return transactions;
+      };
+    });
   } catch (error) {
     console.error("Error fetching transactions:", error);
     return [];
@@ -268,81 +243,76 @@ export async function GetTransactions(): Promise<Transaction[]> {
 }
 
 // Create transaction
-export async function CreateTransaction(
-  items: { ProductId: number; Quantity: number; Price: number }[],
+export async function createTransaction(
+  items: { ProductId: number; Quantity: number; Price: number; basePrice: number }[],
   totalAmount: number,
   paymentMethod: string,
-  memberId?: number,
-  userId: number = 1 // Default cashier ID - would typically come from auth context
+  userId: number, // Default cashier ID - would typically come from auth context
+  memberId?: number, 
+  manualDiscount?: number
 ): Promise<{ success: boolean; transactionId?: string; error?: string }> {
+  // Use a try-catch block to handle errors from the atomic transaction
   try {
-    // Check credit limit if this is a credit payment
-    if (paymentMethod === "credit" && memberId) {
-      const member = await MemberRepository.GetById(memberId);
-      if (member) {
-        const currentCredit = parseFloat(member.CreditBalance || "0");
-        const creditLimit = parseFloat(member.CreditLimit || "0");
-        const newCredit = currentCredit + totalAmount;
-        
-        // Check if transaction would exceed credit limit
-        if (newCredit > creditLimit) {
-          return {
-            success: false,
-            error: `Transaction would exceed member's credit limit of ₱${creditLimit.toFixed(2)}`
-          };
-        }
-      }
-    }
-    
-    // Format transaction data
-    const transactionData = {
-      UserId: userId,
-      MemberId: memberId,
-      TotalAmount: totalAmount.toFixed(2),
-      PaymentMethod: paymentMethod,
-    };
-    
+    let result;
+
     // Format items data
-    const transactionItems = items.map(item => ({
+    const transactionItems = items.map((item) => ({
       ProductId: item.ProductId,
       Quantity: item.Quantity,
-      PriceAtTimeOfSale: item.Price.toFixed(2),
+      PriceAtTimeOfSale: (item.Price || 0).toFixed(2),
+      BasePriceAtTimeOfSale: (item.basePrice || 0).toFixed(2),
+      Profit: (((item.Price || 0) - (item.basePrice || 0)) * item.Quantity).toFixed(2),
     }));
-    
-    // Create transaction with items
-    const result = await TransactionRepository.CreateWithItems(transactionData, transactionItems);
-    
-    // Update product stock quantities
-    for (const item of items) {
-      const product = await ProductRepository.GetById(item.ProductId);
-      if (product) {
-        const newStockQuantity = product.Products.StockQuantity - item.Quantity;
-        await ProductRepository.UpdateStock(item.ProductId, newStockQuantity);
-        
-        // Check if stock is low after this transaction
-        const STOCK_THRESHOLD = 10; // This should match the threshold in notifications.ts
-        if (newStockQuantity <= STOCK_THRESHOLD) {
-          // Import dynamically to avoid circular dependencies
-          const { SendLowStockNotification } = await import('@/lib/notifications');
-          await SendLowStockNotification(
-            item.ProductId,
-            product.Products.Name,
-            newStockQuantity
-          );
+
+    if (paymentMethod === 'credit' && memberId) {
+      // Use the new atomic method for credit transactions
+      result = await TransactionRepository.processCreditTransaction(
+        {
+          UserId: userId, // No change needed here as we use the named property
+          MemberId: memberId,
+          TotalAmount: totalAmount.toFixed(2),
+          PaymentMethod: paymentMethod,
+          ManualDiscountAmount: manualDiscount?.toFixed(2),
+        },
+        transactionItems
+      );
+    } else {
+      // Use the existing (but now less safe) method for non-credit transactions.
+      // Ideally, this should also be converted to an atomic transaction.
+      const transactionData = {
+        UserId: userId,
+        MemberId: memberId, // No change needed here
+        TotalAmount: totalAmount.toFixed(2),
+        PaymentMethod: paymentMethod,
+        ManualDiscountAmount: manualDiscount?.toFixed(2),
+      };
+      result = await TransactionRepository.CreateWithItems(transactionData, transactionItems);
+
+      // Manually update stock for non-credit transactions
+      for (const item of items) {
+        const product = await ProductRepository.GetById(item.ProductId);
+        if (product) {
+          const newStockQuantity = product.Products.StockQuantity - item.Quantity;
+          await ProductRepository.UpdateStock(item.ProductId, newStockQuantity);
+
+          // Check if stock is low after this transaction
+          const STOCK_THRESHOLD = 10;
+          if (newStockQuantity <= STOCK_THRESHOLD) {
+            const { SendLowStockNotification } = await import('@/lib/notifications');
+            await SendLowStockNotification(
+              item.ProductId,
+              product.Products.Name,
+              newStockQuantity
+            );
+          }
         }
       }
     }
-    
-    // Update member credit if using credit payment
-    if (paymentMethod === "credit" && memberId) {
-      const member = await MemberRepository.GetById(memberId);
-      if (member) {
-        const currentCredit = parseFloat(member.CreditBalance || "0");
-        const newCredit = currentCredit + totalAmount;
-        await MemberRepository.UpdateCreditBalance(memberId, newCredit.toFixed(2));
-      }
+
+    if (!result || !result.transaction) {
+      throw new Error("Transaction failed to process.");
     }
-    
+
     // Send purchase notification to admins
     try {
       if (memberId) {
@@ -371,7 +341,7 @@ export async function CreateTransaction(
 
     return {
       success: true,
-      transactionId: `TRX-${result.transaction.TransactionId}` 
+      transactionId: `TRX-${result.transaction.TransactionId}`,
     };
   } catch (error: unknown) {
     console.error("Error creating transaction:", error);
@@ -383,7 +353,7 @@ export async function CreateTransaction(
 }
 
 // Send receipt email
-export async function SendReceiptEmail(
+export async function sendReceiptEmail(
   transactionId: string,
   customerEmail: string,
   customerName: string
@@ -438,7 +408,7 @@ export async function SendReceiptEmail(
     const cashier = transaction.Users?.Name || "Unknown Cashier";
     
     // Calculate subtotal
-    const subtotal = items.reduce((total, item) => total + item.subtotal, 0);
+    const subtotal = items.reduce((total: number, item: { subtotal: number }) => total + item.subtotal, 0);
     
     // Prepare receipt data
     const receiptData = {

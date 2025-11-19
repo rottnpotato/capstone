@@ -14,7 +14,9 @@ import {
   Calendar,
   X,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Plus,
+  CalendarDays
 } from "lucide-react"
 import { Navbar } from "@/components/ui/navbar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,6 +30,9 @@ import {
   GetDashboardStats,
   GetRecentMemberActivities,
   GetUpcomingEvents,
+  GetSalesData,
+  GetRevenueDistribution,
+  GetCalendarEvents,
   AdminTransaction, 
   InventoryAlert,
   MemberActivity,
@@ -35,6 +40,32 @@ import {
   DashboardStats
 } from "./actions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { 
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent
+} from "@/components/ui/chart"
+import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  PieChart as ReChartPie,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  Legend,
+  Tooltip
+} from "recharts"
+import { format, parseISO } from "date-fns"
+import Link from "next/link"
+import { CalendarEvent } from "../api/calendar/route"
+import { Badge } from "@/components/ui/badge"
 
 export default function AdminDashboard() {
   const [timeRange, setTimeRange] = useState("week")
@@ -56,6 +87,9 @@ export default function AdminDashboard() {
   const [memberActivities, setMemberActivities] = useState<MemberActivity[]>([])
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null)
+  const [salesData, setSalesData] = useState<{ date: string; amount: number }[]>([])
+  const [revenueDistribution, setRevenueDistribution] = useState<{ name: string; value: number; percentage: number }[]>([])
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([])
   
   // Loading states
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(true)
@@ -63,6 +97,9 @@ export default function AdminDashboard() {
   const [isLoadingActivities, setIsLoadingActivities] = useState(true)
   const [isLoadingEvents, setIsLoadingEvents] = useState(true)
   const [isLoadingStats, setIsLoadingStats] = useState(true)
+  const [isLoadingSalesData, setIsLoadingSalesData] = useState(true)
+  const [isLoadingRevenueData, setIsLoadingRevenueData] = useState(true)
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(true)
   
   // Error states
   const [transactionError, setTransactionError] = useState<string | null>(null)
@@ -70,6 +107,9 @@ export default function AdminDashboard() {
   const [activitiesError, setActivitiesError] = useState<string | null>(null)
   const [eventsError, setEventsError] = useState<string | null>(null)
   const [statsError, setStatsError] = useState<string | null>(null)
+  const [salesDataError, setSalesDataError] = useState<string | null>(null)
+  const [revenueDataError, setRevenueDataError] = useState<string | null>(null)
+  const [calendarError, setCalendarError] = useState<string | null>(null)
 
   // Fetch transactions from database
   useEffect(() => {
@@ -171,6 +211,67 @@ export default function AdminDashboard() {
     fetchEvents()
   }, [])
 
+  // Fetch sales data for charts
+  useEffect(() => {
+    const fetchSalesData = async () => {
+      setIsLoadingSalesData(true)
+      setSalesDataError(null)
+      
+      try {
+        const data = await GetSalesData(timeRange)
+        setSalesData(data)
+      } catch (err) {
+        console.error("Error fetching sales data:", err)
+        setSalesDataError("Failed to load sales data. Please try again.")
+      } finally {
+        setIsLoadingSalesData(false)
+      }
+    }
+    
+    fetchSalesData()
+  }, [timeRange])
+
+  // Fetch revenue distribution data for charts
+  useEffect(() => {
+    const fetchRevenueDistribution = async () => {
+      setIsLoadingRevenueData(true)
+      setRevenueDataError(null)
+      
+      try {
+        const data = await GetRevenueDistribution(timeRange)
+        console.log("Revenue Distribution Data:", data)
+        setRevenueDistribution(data)
+      } catch (err) {
+        console.error("Error fetching revenue distribution:", err)
+        setRevenueDataError("Failed to load revenue distribution data. Please try again.")
+      } finally {
+        setIsLoadingRevenueData(false)
+      }
+    }
+    
+    fetchRevenueDistribution()
+  }, [timeRange])
+
+  // Fetch calendar events
+  useEffect(() => {
+    const fetchCalendarEvents = async () => {
+      setIsLoadingCalendar(true)
+      setCalendarError(null)
+      
+      try {
+        const data = await GetCalendarEvents(5)
+        setCalendarEvents(data)
+      } catch (err) {
+        console.error("Error fetching calendar events:", err)
+        setCalendarError("Failed to load calendar events. Please try again.")
+      } finally {
+        setIsLoadingCalendar(false)
+      }
+    }
+    
+    fetchCalendarEvents()
+  }, [])
+
   // Function to generate reports
   const generateReport = (type: string) => {
     setReportType(type)
@@ -216,6 +317,24 @@ export default function AdminDashboard() {
     setSelectedMember(null)
     setReportGenerating(false)
     setReportGenerated(false)
+  }
+
+  // Get event type badge color
+  const getEventTypeColor = (type: CalendarEvent["type"]) => {
+    switch (type) {
+      case "meeting":
+        return "bg-blue-100 text-blue-800"
+      case "promotion":
+        return "bg-purple-100 text-purple-800"
+      case "inventory":
+        return "bg-green-100 text-green-800"
+      case "member":
+        return "bg-amber-100 text-amber-800"
+      case "holiday":
+        return "bg-red-100 text-red-800"
+      default:
+        return "bg-gray-100 text-gray-800"
+    }
   }
 
   return (
@@ -365,17 +484,72 @@ export default function AdminDashboard() {
                   <CardTitle className="text-lg font-medium">Sales Overview</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-80 flex flex-col items-center justify-center bg-gray-50 rounded-md p-4">
-                    <div className="w-full h-full flex items-center justify-center">
-                      <BarChart3 className="h-32 w-32 text-amber-500 opacity-20" />
+                  {isLoadingSalesData ? (
+                    <div className="h-80 flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 text-amber-500 animate-spin" />
                     </div>
-                    <div className="mt-4 text-center">
-                      <p className="text-gray-500">Sales data visualization</p>
-                      <Button variant="outline" size="sm" className="mt-2" onClick={() => generateReport("sales")}>
-                        View Detailed Report
-                      </Button>
+                  ) : salesDataError ? (
+                    <Alert className="bg-red-50 border-red-200 text-red-800">
+                      <AlertDescription>{salesDataError}</AlertDescription>
+                    </Alert>
+                  ) : salesData.length === 0 ? (
+                    <div className="h-80 flex flex-col items-center justify-center bg-gray-50 rounded-md p-4">
+                      <BarChart3 className="h-16 w-16 text-amber-500 opacity-20 mb-4" />
+                      <p className="text-gray-500">No sales data available for the selected period</p>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart
+                          data={salesData}
+                          margin={{ top: 10, right: 30, left: 0, bottom: 5 }}
+                        >
+                          <defs>
+                            <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8} />
+                              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.1} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="date" 
+                            tick={{ fontSize: 12, fill: '#64748b' }}
+                            tickLine={false}
+                            axisLine={{ stroke: '#e2e8f0' }}
+                          />
+                          <YAxis 
+                            tick={{ fontSize: 12, fill: '#64748b' }}
+                            tickLine={false}
+                            axisLine={{ stroke: '#e2e8f0' }}
+                            tickFormatter={(value) => `₱${value}`}
+                          />
+                          <Tooltip 
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                return (
+                                  <div className="bg-white p-3 border border-gray-200 shadow-md rounded-md">
+                                    <p className="font-medium">{payload[0].payload.date}</p>
+                                    <p className="text-amber-500 font-semibold">
+                                      ₱{payload[0]?.value?.toLocaleString() || '0'}
+                                    </p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Area 
+                            type="monotone" 
+                            dataKey="amount" 
+                            stroke="#f59e0b" 
+                            strokeWidth={2}
+                            fillOpacity={1} 
+                            fill="url(#colorSales)" 
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>
@@ -390,17 +564,82 @@ export default function AdminDashboard() {
                   <CardTitle className="text-lg font-medium">Revenue Distribution</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-80 flex flex-col items-center justify-center bg-gray-50 rounded-md p-4">
-                    <div className="w-full h-full flex items-center justify-center">
-                      <PieChart className="h-32 w-32 text-amber-500 opacity-20" />
+                  {isLoadingRevenueData ? (
+                    <div className="h-80 flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 text-amber-500 animate-spin" />
                     </div>
-                    <div className="mt-4 text-center">
-                      <p className="text-gray-500">Revenue distribution by category</p>
-                      <Button variant="outline" size="sm" className="mt-2" onClick={() => generateReport("revenue")}>
-                        View Detailed Report
-                      </Button>
+                  ) : revenueDataError ? (
+                    <Alert className="bg-red-50 border-red-200 text-red-800">
+                      <AlertDescription>{revenueDataError}</AlertDescription>
+                    </Alert>
+                  ) : revenueDistribution.length === 0 ? (
+                    <div className="h-80 flex flex-col items-center justify-center bg-gray-50 rounded-md p-4">
+                      <PieChart className="h-16 w-16 text-amber-500 opacity-20 mb-4" />
+                      <p className="text-gray-500">No revenue data available for the selected period</p>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ReChartPie>
+                          {console.log("Rendering Revenue Chart with data:", revenueDistribution)}
+                          <Pie
+                            data={revenueDistribution}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            outerRadius={80}
+                            innerRadius={40}
+                            fill="#8884d8"
+                            dataKey="value"
+                            nameKey="name"
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          >
+                            {revenueDistribution.map((entry, index) => {
+                              // Color palette that complements amber/orange
+                              const COLORS = ['#f59e0b', '#fb923c', '#ea580c', '#fdba74', '#f97316', '#fbbf24', '#d97706', '#fed7aa'];
+                              return (
+                                <Cell 
+                                  key={`cell-${index}`} 
+                                  fill={COLORS[index % COLORS.length]} 
+                                />
+                              )
+                            })}
+                          </Pie>
+                          <Legend 
+                            layout="vertical" 
+                            verticalAlign="middle" 
+                            align="right"
+                            wrapperStyle={{ fontSize: '12px' }}
+                            formatter={(value, entry, index) => {
+                              // Safely access the revenueDistribution array
+                              const item = revenueDistribution[index];
+                              if (item) {
+                                return `${value}: ₱${item.value.toLocaleString()}`;
+                              }
+                              return value;
+                            }}
+                          />
+                          <Tooltip 
+                            formatter={(value) => [`₱${value.toLocaleString()}`, 'Revenue']}
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                return (
+                                  <div className="bg-white p-3 border border-gray-200 shadow-md rounded-md">
+                                    <p className="font-medium">{data.name}</p>
+                                    <p className="text-amber-500 font-semibold">
+                                      ₱{data.value.toLocaleString()} ({data.percentage}%)
+                                    </p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                        </ReChartPie>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>
@@ -590,21 +829,86 @@ export default function AdminDashboard() {
               className="lg:col-span-2"
             >
               <Card>
-                <CardHeader className="pb-2">
+                <CardHeader className="pb-2 flex flex-row items-center justify-between">
                   <CardTitle className="text-lg font-medium">Calendar</CardTitle>
+                  <Link href="/admin/calendar">
+                    <Button variant="outline" size="sm" className="h-8">
+                      <CalendarDays className="h-4 w-4 mr-2" />
+                      View Full Calendar
+                    </Button>
+                  </Link>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-80 flex flex-col items-center justify-center bg-gray-50 rounded-md p-4">
-                    <div className="w-full h-full flex items-center justify-center">
+                  {isLoadingCalendar ? (
+                    <div className="h-80 flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 text-amber-500 animate-spin" />
+                    </div>
+                  ) : calendarError ? (
+                    <Alert className="bg-red-50 border-red-200 text-red-800">
+                      <AlertDescription>{calendarError}</AlertDescription>
+                    </Alert>
+                  ) : calendarEvents.length === 0 ? (
+                    <div className="h-80 flex flex-col items-center justify-center bg-gray-50 rounded-md p-4">
                       <Calendar className="h-32 w-32 text-amber-500 opacity-20" />
+                      <p className="text-gray-500 mt-4">No upcoming events found</p>
+                      <Link href="/admin/calendar">
+                        <Button variant="outline" size="sm" className="mt-2">
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add New Event
+                        </Button>
+                      </Link>
                     </div>
-                    <div className="mt-4 text-center">
-                      <p className="text-gray-500">Calendar and scheduling</p>
-                      <Button variant="outline" size="sm" className="mt-2">
-                        View Full Calendar
-                      </Button>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        {calendarEvents.slice(0, 3).map((event, index) => (
+                          <Link href="/admin/calendar" key={index}>
+                            <div className="border rounded-lg p-4 h-full hover:shadow-md transition-shadow cursor-pointer flex flex-col justify-between">
+                              <div className="mb-2">
+                                <Badge className={getEventTypeColor(event.type)}>
+                                  {event.type.charAt(0).toUpperCase() + event.type.slice(1)}
+                                </Badge>
+                              </div>
+                              <div>
+                                <h3 className="font-medium line-clamp-2">{event.title}</h3>
+                                <p className="text-sm text-gray-500 mt-1">
+                                  {format(parseISO(event.startDate), "MMM d, yyyy")}
+                                </p>
+                              </div>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                      
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        {calendarEvents.slice(3, 5).map((event, index) => (
+                          <Link href="/admin/calendar" key={index} className="flex-1">
+                            <div className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer h-full flex flex-col justify-between">
+                              <div className="mb-2">
+                                <Badge className={getEventTypeColor(event.type)}>
+                                  {event.type.charAt(0).toUpperCase() + event.type.slice(1)}
+                                </Badge>
+                              </div>
+                              <div>
+                                <h3 className="font-medium line-clamp-2">{event.title}</h3>
+                                <p className="text-sm text-gray-500 mt-1">
+                                  {format(parseISO(event.startDate), "MMM d, yyyy")}
+                                </p>
+                              </div>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                      
+                      <div className="text-center">
+                        <Link href="/admin/calendar">
+                          <Button variant="outline" size="sm">
+                            View All Events
+                          </Button>
+                        </Link>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>

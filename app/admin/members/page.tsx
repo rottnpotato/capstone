@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { motion } from "framer-motion"
 import { Navbar } from "@/components/ui/navbar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Search, Plus, ArrowUpDown, MoreHorizontal, Edit, Trash2, CreditCard, Mail, Loader2, BadgeInfo, Receipt, CheckCircle2, AlertCircle } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -43,9 +43,10 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 
+import { GetCurrentSession } from "@/lib/auth";
 // Use the interface from the API route
 import type { MemberForAdminPage } from "@/app/api/members/route";
-import { IssueAccountVerification, AddMember, UpdateMember, DeleteMember } from "./actions";
+import { IssueAccountVerification, AddMember, UpdateMember, DeleteMember, AcceptCreditPayment } from "./actions";
 
 // Debounce function
 function debounce<T extends (...args: any[]) => void>(func: T, wait: number): (...args: Parameters<T>) => void {
@@ -71,6 +72,11 @@ const addMemberFormSchema = z.object({
   userId: z.string().optional(),
   initialCredit: z.coerce.number().nonnegative().default(0),
   creditLimit: z.coerce.number().nonnegative().default(0),
+});
+
+const paymentFormSchema = z.object({
+  memberId: z.string().min(1, "Member is required."),
+  amount: z.coerce.number().positive("Amount must be greater than 0."),
 });
 
 type Role = {
@@ -198,6 +204,12 @@ export default function AdminMembersPage() {
   const [isViewMemberModalOpen, setIsViewMemberModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [issuingAccount, setIssuingAccount] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentMemberSearch, setPaymentMemberSearch] = useState("");
+  const [searchedMembers, setSearchedMembers] = useState<MemberForAdminPage[]>([]);
+  const [isSearchingMembers, setIsSearchingMembers] = useState(false);
+  const [selectedMemberForPayment, setSelectedMemberForPayment] = useState<MemberForAdminPage | null>(null);
   const [accountIssueMessage, setAccountIssueMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   // Setup form
@@ -228,6 +240,14 @@ export default function AdminMembersPage() {
     },
   });
 
+  // Payment form
+  const paymentForm = useForm<z.infer<typeof paymentFormSchema>>({
+    resolver: zodResolver(paymentFormSchema),
+    defaultValues: {
+      memberId: "",
+      amount: 0,
+    },
+  });
   // Data fetching function
   const fetchMembers = useCallback(async (params: { 
     searchQuery: string; 
@@ -255,6 +275,7 @@ export default function AdminMembersPage() {
         throw new Error(data.message || "Failed to fetch members");
       }
 
+      console.log("Raw members data from API:", data.members); // Add this for debugging
       setMembers(data.members || []);
       setTotalCount(data.pagination?.totalCount || 0);
 
@@ -291,6 +312,25 @@ export default function AdminMembersPage() {
   // Debounced search handler
   const debouncedFetch = useCallback(debounce(fetchMembers, 500), [fetchMembers]);
 
+  // Debounced member search for payment modal
+  const searchMembersForPayment = useCallback(debounce(async (query: string) => {
+    if (query.length < 2) {
+      setSearchedMembers([]);
+      return;
+    }
+    setIsSearchingMembers(true);
+    try {
+      const response = await fetch(`/api/members?searchQuery=${query}&pageSize=5`);
+      const data = await response.json();
+      if (data.success) {
+        setSearchedMembers(data.members || []);
+      }
+    } catch (err) {
+      console.error("Error searching members:", err);
+    } finally {
+      setIsSearchingMembers(false);
+    }
+  }, 300), []);
   // Initial fetch and fetch on dependency change
   useEffect(() => {
     debouncedFetch({ searchQuery, statusFilter, sortBy, sortOrder, page, pageSize });
@@ -317,6 +357,20 @@ export default function AdminMembersPage() {
       });
     }
   }, [selectedMember, isEditMemberModalOpen, editMemberForm]);
+
+  // Update payment form when a member is selected
+  useEffect(() => {
+    paymentForm.setValue("memberId", selectedMemberForPayment?.id || "");
+  }, [selectedMemberForPayment, paymentForm]);
+
+  // Helper function to format Date objects for display
+  const formatDate = (date: Date | string | null): string => {
+    if (!date) return 'N/A';
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+
 
   // Edit member form submission
   const onEditMemberSubmit = async (values: z.infer<typeof addMemberFormSchema>) => {
@@ -362,22 +416,9 @@ export default function AdminMembersPage() {
   };
 
   // --- Modal Handlers (Placeholder - Need actual API calls for Add/Edit/Delete) ---
-  const handleEditMember = async (member: MemberForAdminPage) => {
-    try {
-      // Fetch the complete member details
-      const response = await fetch(`/api/members/${member.id}`);
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to fetch member details");
-      }
-      
-      setSelectedMember(data.member);
-      setIsEditMemberModalOpen(true);
-    } catch (err: any) {
-      console.error("Fetch member details error:", err);
-      // Could show error notification here
-    }
+  const handleEditMember = (member: MemberForAdminPage) => {
+    setSelectedMember(member);
+    setIsEditMemberModalOpen(true);
   };
 
   const handleDeleteMember = (member: MemberForAdminPage) => {
@@ -385,27 +426,16 @@ export default function AdminMembersPage() {
     setIsDeleteConfirmOpen(true);
   };
 
-  const handleViewMember = async (member: MemberForAdminPage) => {
-    try {
-      // Fetch the complete member details
-      const response = await fetch(`/api/members/${member.id}`);
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to fetch member details");
-      }
-      
-      setSelectedMember(data.member);
-      setIsViewMemberModalOpen(true);
-    } catch (err: any) {
-      console.error("Fetch member details error:", err);
-      // Could show error notification here
-    }
+  const handleViewMember = (member: MemberForAdminPage) => {
+    setSelectedMember(member);
+    setDeleteError(null); // Clear previous errors
+    setIsViewMemberModalOpen(true);
   };
 
   const confirmDelete = async () => {
     if (!selectedMember) return;
     setIsSubmitting(true);
+    setDeleteError(null);
     try {
       // Use the server action instead of fetch
       const result = await DeleteMember(selectedMember.id);
@@ -423,7 +453,8 @@ export default function AdminMembersPage() {
       
     } catch (err: any) {
       console.error("Delete member error:", err);
-      // Could add toast notification here for error
+      // Set the error message to be displayed in the modal
+      setDeleteError(err.message || "An unexpected error occurred.");
     } finally {
       setIsSubmitting(false);
     }
@@ -478,6 +509,37 @@ export default function AdminMembersPage() {
     }
   };
 
+  const onPaymentSubmit = async (values: z.infer<typeof paymentFormSchema>) => {
+    setIsSubmitting(true);
+    try {
+      const result = await AcceptCreditPayment({
+        memberId: values.memberId,
+        paymentAmount: values.amount,
+      });
+
+      if (!result.success) {
+        throw new Error(result.message || "Failed to process payment.");
+      }
+
+      // Optionally, show a success message
+      alert(result.message);
+
+      // Close modal and reset state
+      setIsPaymentModalOpen(false);
+      setPaymentMemberSearch("");
+      setSearchedMembers([]);
+      setSelectedMemberForPayment(null);
+      paymentForm.reset();
+
+      // Refetch members to update credit balance in the main table
+      fetchMembers({ searchQuery, statusFilter, sortBy, sortOrder, page, pageSize });
+
+    } catch (err: any) {
+      paymentForm.setError("root", { message: err.message || "An error occurred." });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   const handleIssueAccount = async (member: MemberForAdminPage) => {
     if (member.userId) {
       setAccountIssueMessage({
@@ -531,12 +593,20 @@ export default function AdminMembersPage() {
               <h1 className="text-2xl font-bold text-gray-900">Member Management</h1>
               <p className="text-gray-600">Manage cooperative members ({totalCount} total)</p>
             </div>
-            <Button
-              className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
-              onClick={() => setIsAddMemberModalOpen(true)}
-            >
-              <Plus className="h-4 w-4 mr-2" /> Add Member
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setIsPaymentModalOpen(true)}
+              >
+                <CreditCard className="h-4 w-4 mr-2" /> Accept Payment
+              </Button>
+              <Button
+                className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
+                onClick={() => setIsAddMemberModalOpen(true)}
+              >
+                <Plus className="h-4 w-4 mr-2" /> Add Member
+              </Button>
+            </div>
           </div>
 
           {/* Filters */}
@@ -632,9 +702,11 @@ export default function AdminMembersPage() {
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{member.memberID}</td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{member.email}</td>
                               <td className="px-6 py-4 whitespace-nowrap">
-                                <Badge 
+                                <Badge
                                   variant={member.status === 'active' ? 'default' : member.status === 'inactive' ? 'secondary' : 'outline'}
-                                  className="capitalize"
+                                  className={`capitalize ${
+                                    member.status === 'active' ? 'bg-green-100 text-green-800 border-green-200 hover:bg-green-100' : ''
+                                  }`}
                                 >
                                   {member.status} {/* Needs actual status data */}
                                 </Badge>
@@ -645,7 +717,7 @@ export default function AdminMembersPage() {
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {member.roleName || 'No Role'}
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{member.joinDate}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(member.joinDate)}</td>
                               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
@@ -1053,7 +1125,7 @@ export default function AdminMembersPage() {
               <p><strong>Member ID:</strong> {selectedMember.memberID}</p>
               <p><strong>Email:</strong> {selectedMember.email}</p>
               <p><strong>Phone:</strong> {selectedMember.phone}</p>
-              <p><strong>Join Date:</strong> {selectedMember.joinDate}</p>
+              <p><strong>Join Date:</strong> {formatDate(selectedMember.joinDate)}</p>
               <div><strong>Status:</strong> <Badge variant={selectedMember.status === 'active' ? 'default' : 'secondary'} className="capitalize">{selectedMember.status}</Badge></div>
               <p><strong>Credit Balance:</strong> {selectedMember.currentCredit.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })}</p>
               <p><strong>Credit Limit:</strong> {selectedMember.creditLimit.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })}</p>
@@ -1077,11 +1149,118 @@ export default function AdminMembersPage() {
               Are you sure you want to delete member "{selectedMember?.name}" (ID: {selectedMember?.memberID})?
               This action cannot be undone.
             </DialogDescription>
+            {deleteError && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{deleteError}</AlertDescription>
+              </Alert>
+            )}
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDeleteConfirmOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmDelete}>Delete Member</Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete Member
+            </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Accept Payment Modal */}
+      <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Accept Credit Payment</DialogTitle>
+            <DialogDescription>Record a payment made by a member for their credit balance.</DialogDescription>
+          </DialogHeader>
+          <Form {...paymentForm}>
+            <form onSubmit={paymentForm.handleSubmit(onPaymentSubmit)} className="space-y-4">
+              <FormField
+                control={paymentForm.control}
+                name="memberId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Member</FormLabel>
+                    <FormControl>
+                      <div>
+                        {!selectedMemberForPayment ? (
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <Input
+                              placeholder="Search for a member..."
+                              value={paymentMemberSearch}
+                              onChange={(e) => {
+                                setPaymentMemberSearch(e.target.value);
+                                searchMembersForPayment(e.target.value);
+                              }}
+                              className="pl-10"
+                            />
+                            {isSearchingMembers && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin" />}
+                            {paymentMemberSearch.length > 1 && !isSearchingMembers && (
+                              <div className="absolute z-10 w-full bg-white border rounded-md mt-1 shadow-lg max-h-60 overflow-y-auto">
+                                {searchedMembers.length > 0 ? (
+                                  searchedMembers.map(member => (
+                                    <div
+                                      key={member.id}
+                                      className="p-2 hover:bg-gray-100 cursor-pointer"
+                                      onClick={() => {
+                                        setSelectedMemberForPayment(member);
+                                        setSearchedMembers([]);
+                                        setPaymentMemberSearch("");
+                                      }}
+                                    >
+                                      <p className="font-medium">{member.name}</p>
+                                      <p className="text-sm text-gray-500">{member.email}</p>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="p-2 text-gray-500">No members found.</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between p-2 border rounded-md">
+                            <div>
+                              <p className="font-medium">{selectedMemberForPayment.name}</p>
+                              <p className="text-sm text-gray-500">Credit Balance: {selectedMemberForPayment.currentCredit.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })}</p>
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={() => setSelectedMemberForPayment(null)}>Change</Button>
+                          </div>
+                        )}
+                      </div>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={paymentForm.control}
+                name="amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Payment Amount</FormLabel>
+                    <FormControl>
+                      <Input type="number" placeholder="0.00" {...field} min="0.01" step="0.01" disabled={!selectedMemberForPayment} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {paymentForm.formState.errors.root && (
+                <Alert variant="destructive">
+                  <AlertDescription>{paymentForm.formState.errors.root.message}</AlertDescription>
+                </Alert>
+              )}
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsPaymentModalOpen(false)}>Cancel</Button>
+                <Button type="submit" disabled={isSubmitting || !selectedMemberForPayment}>
+                  {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Accept Payment
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
 

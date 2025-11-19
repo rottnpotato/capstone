@@ -1,17 +1,39 @@
 import { db } from '../connection';
-import { Members } from '../schema';
-import { eq } from 'drizzle-orm';
+import { Members, Users, Roles } from '../schema';
+import { eq, sql, getTableColumns } from 'drizzle-orm';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import type * as schema from '../schema';
+
+/**
+ * Represents the flattened result of a joined query on Members, Users, and Roles.
+ */
+export type JoinedMemberResult = typeof Members.$inferSelect & {
+  UserName: string | null;
+  UserEmail: string | null;
+  RoleName: string | null;
+};
+
+type DbOrTx = PostgresJsDatabase<typeof schema>;
 
 /**
  * Repository for Member data access
  */
 export class MemberRepository {
   /**
-   * Get all members
+   * Get all members with their associated user and role info
    */
   static async GetAll() {
     try {
-      return await db.select().from(Members);
+      return await db
+        .select({
+          ...getTableColumns(Members),
+          UserName: Users.Name,
+          UserEmail: Users.Email,
+          RoleName: Roles.Name,
+        })
+        .from(Members)
+        .leftJoin(Users, eq(Members.UserId, Users.UserId))
+        .leftJoin(Roles, eq(Users.RoleId, Roles.RoleId));
     } catch (error) {
       console.error('Error getting all members:', error);
       throw error;
@@ -20,13 +42,32 @@ export class MemberRepository {
 
   /**
    * Get a member by ID
+   * @param memberId - The ID of the member
+   * @param forUpdate - If true, locks the row for an update transaction
+   * @param tx - Optional transaction object
    */
-  static async GetById(memberId: number) {
+  static async GetById(memberId: number, forUpdate: boolean = false, tx?: DbOrTx) {
+    const dbConnection = tx || db;
     try {
-      const results = await db.select()
+      let query = dbConnection
+        .select({
+          ...getTableColumns(Members),
+          UserName: Users.Name,
+          UserEmail: Users.Email,
+          RoleName: Roles.Name,
+        })
         .from(Members)
-        .where(eq(Members.MemberId, memberId));
-      
+        .leftJoin(Users, eq(Members.UserId, Users.UserId))
+        .leftJoin(Roles, eq(Users.RoleId, Roles.RoleId));
+
+      if (forUpdate) {
+        // Drizzle doesn't directly support .for('update') on joined queries this way.
+        // A raw query is a reliable way to lock the row.
+        await dbConnection.execute(sql`SELECT "MemberId" FROM "Members" WHERE "MemberId" = ${memberId} FOR UPDATE`);
+      }
+
+      const results = await query.where(eq(Members.MemberId, memberId));
+
       return results.length > 0 ? results[0] : null;
     } catch (error) {
       console.error(`Error getting member by ID ${memberId}:`, error);
@@ -39,10 +80,17 @@ export class MemberRepository {
    */
   static async GetByEmail(email: string) {
     try {
-      const results = await db.select()
+      const results = await db.select({
+        ...getTableColumns(Members),
+        UserName: Users.Name,
+        UserEmail: Users.Email,
+        RoleName: Roles.Name,
+      })
         .from(Members)
+        .leftJoin(Users, eq(Members.UserId, Users.UserId))
+        .leftJoin(Roles, eq(Users.RoleId, Roles.RoleId))
         .where(eq(Members.Email, email));
-      
+
       return results.length > 0 ? results[0] : null;
     } catch (error) {
       console.error(`Error getting member by email ${email}:`, error);
@@ -51,59 +99,38 @@ export class MemberRepository {
   }
 
   /**
-   * Get members by user ID
+   * Get members by their associated User ID
+   * @param userId - The ID of the user
    */
   static async GetByUserId(userId: number) {
     try {
-      const results = await db.select()
+      const results = await db.select({
+        ...getTableColumns(Members),
+        UserName: Users.Name,
+        UserEmail: Users.Email,
+        RoleName: Roles.Name,
+      })
         .from(Members)
+        .leftJoin(Users, eq(Members.UserId, Users.UserId))
+        .leftJoin(Roles, eq(Users.RoleId, Roles.RoleId))
         .where(eq(Members.UserId, userId));
-      
-      return results;
+
+      return results; // Can return multiple members if a user is linked to more than one
     } catch (error) {
       console.error(`Error getting member by user ID ${userId}:`, error);
       throw error;
     }
   }
-
   /**
-   * Create a new member
+   * Update a member's details
+   * @param memberId - The ID of the member to update
+   * @param memberData - The data to update
+   * @param tx - Optional transaction object
    */
-  static async Create(memberData: {
-    Name: string;
-    Email: string;
-    Phone?: string;
-    Address?: string;
-    CreditBalance?: string;
-    CreditLimit?: string;
-    UserId?: number;
-  }) {
+  static async Update(memberId: number, memberData: Partial<typeof Members.$inferInsert>, tx?: DbOrTx) {
+    const dbConnection = tx || db;
     try {
-      const results = await db.insert(Members)
-        .values(memberData)
-        .returning();
-      
-      return results.length > 0 ? results[0] : null;
-    } catch (error) {
-      console.error('Error creating member:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Update a member
-   */
-  static async Update(memberId: number, memberData: Partial<{
-    Name: string;
-    Email: string;
-    Phone: string;
-    Address: string;
-    CreditBalance: string;
-    CreditLimit: string;
-    UserId: number;
-  }>) {
-    try {
-      const results = await db.update(Members)
+      const results = await dbConnection.update(Members)
         .set(memberData)
         .where(eq(Members.MemberId, memberId))
         .returning();
@@ -116,27 +143,15 @@ export class MemberRepository {
   }
 
   /**
-   * Delete a member
+   * Update a member's credit balance
+   * @param memberId - The ID of the member
+   * @param newBalance - The new credit balance
+   * @param tx - Optional transaction object
    */
-  static async Delete(memberId: number) {
+  static async UpdateCreditBalance(memberId: number, newBalance: string, tx?: DbOrTx) {
+    const dbConnection = tx || db;
     try {
-      const results = await db.delete(Members)
-        .where(eq(Members.MemberId, memberId))
-        .returning();
-      
-      return results.length > 0 ? results[0] : null;
-    } catch (error) {
-      console.error(`Error deleting member ${memberId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Update member credit balance
-   */
-  static async UpdateCreditBalance(memberId: number, newBalance: string) {
-    try {
-      const results = await db.update(Members)
+      const results = await dbConnection.update(Members)
         .set({ CreditBalance: newBalance })
         .where(eq(Members.MemberId, memberId))
         .returning();
@@ -147,4 +162,4 @@ export class MemberRepository {
       throw error;
     }
   }
-} 
+}

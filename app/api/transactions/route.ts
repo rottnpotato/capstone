@@ -72,17 +72,27 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
-    // Create the transaction
-    const transaction = await TransactionRepository.Create({
+    const transactionData = {
       UserId: body.userId,
       MemberId: body.memberId || null,
       TotalAmount: body.totalAmount,
       PaymentMethod: body.paymentMethod
-    });
+    };
+
+    let result;
+    if (body.paymentMethod === 'Credit' && body.memberId) {
+      // Process a credit transaction
+      result = await TransactionRepository.processCreditTransaction(transactionData, body.items);
+    } else {
+      // Process a regular transaction
+      result = await TransactionRepository.CreateWithItems(transactionData, body.items);
+    }
     
-    if (!transaction) {
+    if (!result || !result.transaction) {
       throw new Error("Failed to create transaction");
     }
+
+    const transaction = result.transaction;
     
     // If this was a member purchase, send a notification
     if (body.memberId) {

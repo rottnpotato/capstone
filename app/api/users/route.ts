@@ -111,17 +111,17 @@ export async function GET(request: NextRequest) {
         limit: validatedParams.limit,
       });
       
-      if (!result.success) {
-        console.log("GET /api/users - Repository error:", result.message);
+      if (result.success) {
+        // Return users with pagination
+        console.log(`GET /api/users - Success: Retrieved ${result.users?.length || 0} users`);
+        return NextResponse.json(result);
+      } else {
+        console.log("GET /api/users - Repository error:", result.message || "Unknown repository error");
         return NextResponse.json({
           success: false,
-          message: result.message || "Failed to retrieve users"
+          message: result.message || "Failed to retrieve users",
         }, { status: 500 });
       }
-      
-      // Return users with pagination
-      console.log(`GET /api/users - Success: Retrieved ${result.users?.length || 0} users`);
-      return NextResponse.json(result);
     } catch (error) {
       console.error("GET /api/users - Error processing request:", error);
       
@@ -205,27 +205,27 @@ export async function POST(request: NextRequest) {
     // Create user
     const result = await UserRepository.CreateUser(validationResult.data);
     
-    if (!result.success) {
-      console.log("POST /api/users - Create user failed:", result.message || "Unknown error");
+    if ("user" in result) {
+      // Return success response with type guard to ensure user exists
+      console.log(`POST /api/users - User created successfully: ${result.user.Email}`);
+      return NextResponse.json({
+        success: true,
+        message: "User created successfully",
+        user: {
+          UserId: result.user.UserId,
+          Name: result.user.Name,
+          Email: result.user.Email,
+          RoleId: result.user.RoleId,
+          CreatedAt: result.user.CreatedAt,
+        },
+      }, { status: 201 });
+    } else {
+      console.log("POST /api/users - Create user failed:", result.message);
       return NextResponse.json({
         success: false,
-        message: result.message || "Failed to create user"
+        message: result.message,
       }, { status: 400 });
     }
-    
-    // Return success response with type guard to ensure user exists
-    console.log(`POST /api/users - User created successfully: ${result.user?.Email}`);
-    return NextResponse.json({
-      success: true,
-      message: "User created successfully",
-      user: result.user ? {
-        UserId: result.user.UserId,
-        Name: result.user.Name,
-        Email: result.user.Email,
-        RoleId: result.user.RoleId,
-        CreatedAt: result.user.CreatedAt
-      } : null
-    }, { status: 201 });
   } catch (error) {
     console.error('POST /api/users - Unhandled error:', error);
     

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
 import { Bell, ShoppingCart, Users, BarChart2, Menu, X, User, LogOut, CreditCard, Home, Receipt } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,16 +16,21 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
 import { NotificationBell } from "@/components/ui/NotificationBell"
+import { MemberNotificationBell } from "@/components/ui/MemberNotificationBell"
+import { GetCurrentMemberData, MemberProfileData } from "@/app/members/actions"
 
 interface NavbarProps {
   userType?: "cashier" | "admin" | "member"
   userName?: string
+  memberData?: MemberProfileData
 }
 
-export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarProps) {
+export function Navbar({ userType = "cashier", userName = "John Doe", memberData }: NavbarProps) {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [memberInfo, setMemberInfo] = useState<MemberProfileData | null>(memberData || null)
+  const [isLoadingMemberData, setIsLoadingMemberData] = useState(!memberData && userType === "member")
   const pathname = usePathname()
   const router = useRouter()
   const { toast } = useToast()
@@ -36,6 +42,27 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
     window.addEventListener("scroll", handleScroll)
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
+
+  // Fetch member data if userType is member and memberData is not provided
+  useEffect(() => {
+    async function fetchMemberData() {
+      if (userType === "member" && !memberData) {
+        try {
+          setIsLoadingMemberData(true);
+          const data = await GetCurrentMemberData();
+          if (data) {
+            setMemberInfo(data);
+          }
+        } catch (error) {
+          console.error("Error fetching member data for notifications:", error);
+        } finally {
+          setIsLoadingMemberData(false);
+        }
+      }
+    }
+
+    fetchMemberData();
+  }, [userType, memberData]);
 
   const getNavLinks = () => {
     switch (userType) {
@@ -56,8 +83,6 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
       case "member":
         return [
           { href: "/members", label: "Dashboard", icon: <BarChart2 className="h-4 w-4 mr-2" /> },
-          { href: "/members/purchases", label: "Purchase History", icon: <ShoppingCart className="h-4 w-4 mr-2" /> },
-          { href: "/members/credit", label: "Credit Status", icon: <CreditCard className="h-4 w-4 mr-2" /> },
         ]
       default:
         return []
@@ -125,6 +150,31 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
     }
   };
 
+  // Render notification component based on user type
+  const renderNotifications = () => {
+    if (userType === "admin" || userType === "cashier") {
+      return <NotificationBell />;
+    } else if (userType === "member") {
+      if (isLoadingMemberData) {
+        return (
+          <Button variant="ghost" size="icon" className="relative">
+            <Bell className="h-5 w-5" />
+            <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-gray-300 animate-pulse"></span>
+          </Button>
+        );
+      } else if (memberInfo) {
+        return <MemberNotificationBell memberData={memberInfo} />;
+      }
+    }
+    
+    // Fallback
+    return (
+      <Button variant="ghost" size="icon" className="relative">
+        <Bell className="h-5 w-5" />
+      </Button>
+    );
+  };
+
   return (
     <header
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
@@ -135,9 +185,13 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center">
             <Link href="/" className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-center">
-                <CreditCard className="h-4 w-4 text-white" />
-              </div>
+              <Image 
+                src="/pandol-logo.png" 
+                alt="Pandol Cooperative Logo" 
+                width={60} 
+                height={60} 
+                className="rounded-full"
+              />
               <span className="text-lg font-bold text-gray-900">Pandol Multi-Purpose Cooperative <br /> Management System</span>
             </Link>
           </div>
@@ -176,14 +230,7 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
           </nav>
 
           <div className="flex items-center gap-2">
-            {userType === "admin" || userType === "cashier" ? (
-              <NotificationBell />
-            ) : (
-              <Button variant="ghost" size="icon" className="relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500"></span>
-              </Button>
-            )}
+            {renderNotifications()}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -198,7 +245,7 @@ export function Navbar({ userType = "cashier", userName = "John Doe" }: NavbarPr
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href={`/${userType}/profile`} className="w-full cursor-pointer">
+                  <Link href={userType === 'member' ? '/members/profile' : `/${userType}/profile`} className="w-full cursor-pointer">
                     <User className="mr-2 h-4 w-4" />
                     <span>Profile</span>
                   </Link>
