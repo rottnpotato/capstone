@@ -4,7 +4,7 @@ import { Products, Categories } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { ProductRepository } from '@/db/repositories/ProductRepository';
 import { SendLowStockNotification, SendExpiryWarningNotification } from '@/lib/notifications';
-
+import { io } from '@/lib/socket';
 interface RouteParams {
   params: {
     id: string;
@@ -44,11 +44,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         description: product.Description,
         sku: product.Sku,
         price: parseFloat(String(product.Price)),
+        basePrice: parseFloat(String(product.BasePrice)),
         stock: product.StockQuantity,
         categoryId: product.CategoryId,
         image: product.Image,
         supplier: product.Supplier,
         expiryDate: product.ExpiryDate,
+        discountType: product.DiscountType,
+        discountValue: parseFloat(String(product.DiscountValue || '0')),
         isActive: product.IsActive
       }
     });
@@ -104,11 +107,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (body.name !== undefined) updateData.Name = body.name;
     if (body.description !== undefined) updateData.Description = body.description;
     if (body.price !== undefined) updateData.Price = body.price;
+    if (body.basePrice !== undefined) updateData.BasePrice = body.basePrice;
     if (body.stock !== undefined) updateData.StockQuantity = body.stock;
     if (body.categoryId !== undefined) updateData.CategoryId = body.categoryId;
     if (body.image !== undefined) updateData.Image = body.image;
     if (body.supplier !== undefined) updateData.Supplier = body.supplier;
     if (body.isActive !== undefined) updateData.IsActive = body.isActive;
+    if (body.discountType !== undefined) updateData.DiscountType = body.discountType;
+    if (body.discountValue !== undefined) updateData.DiscountValue = body.discountValue;
     
     // Handle expiry date
     if (body.expiryDate !== undefined) {
@@ -169,6 +175,36 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
     }
     
+    // If the socket server is initialized, broadcast the update
+    if (io) {
+      const categoryResult = await db.query.Categories.findFirst({
+        where: eq(Categories.CategoryId, product.CategoryId)
+      });
+
+      const formattedProductForClient = {
+        id: product.ProductId.toString(),
+        name: product.Name,
+        price: parseFloat(String(product.Price)),
+        basePrice: parseFloat(String(product.BasePrice)),
+        profitValue: parseFloat(String(product.Price)) - parseFloat(String(product.BasePrice)),
+        category: categoryResult?.Name || 'uncategorized',
+        image: product.Image || '/placeholder.svg',
+        stock: product.StockQuantity,
+        description: product.Description || '',
+        supplier: product.Supplier || 'No supplier',
+        lastRestocked: new Date(product.UpdatedAt).toLocaleDateString('en-US', {
+          year: 'numeric', month: 'short', day: 'numeric'
+        }),
+        sku: product.Sku,
+        expiryDate: product.ExpiryDate ? new Date(product.ExpiryDate).toISOString() : null,
+        discountType: product.DiscountType,
+        discountValue: parseFloat(String(product.DiscountValue || '0')),
+        isActive: product.IsActive,
+      };
+      io.emit('product_updated', formattedProductForClient);
+      console.log(`[Socket.IO] Emitted 'product_updated' for product ID: ${product.ProductId}`);
+    }
+
     return NextResponse.json({
       status: 'success',
       message: 'Product updated successfully',
@@ -178,11 +214,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         description: product.Description,
         sku: product.Sku,
         price: parseFloat(String(product.Price)),
+        basePrice: parseFloat(String(product.BasePrice)),
         stock: product.StockQuantity,
         categoryId: product.CategoryId,
         image: product.Image,
         supplier: product.Supplier,
         expiryDate: product.ExpiryDate,
+        discountType: product.DiscountType,
+        discountValue: parseFloat(String(product.DiscountValue || '0')),
         isActive: product.IsActive
       }
     });
@@ -314,11 +353,14 @@ export async function PUT(
         Description: body.description || null,
         Sku: body.sku,
         Price: body.price,
+        BasePrice: body.basePrice,
         StockQuantity: body.stock || 0,
         CategoryId: categoryId,
         Image: body.image || null,
         Supplier: body.supplier || null,
         ExpiryDate: expiryDate,
+        DiscountType: body.discountType || null,
+        DiscountValue: body.discountValue || 0,
         IsActive: body.isActive !== undefined ? body.isActive : true,
         UpdatedAt: new Date()
       })
@@ -337,6 +379,7 @@ export async function PUT(
       id: updatedProduct[0].ProductId,
       name: updatedProduct[0].Name,
       price: parseFloat(updatedProduct[0].Price),
+      basePrice: parseFloat(updatedProduct[0].BasePrice),
       category: body.category,
       sku: updatedProduct[0].Sku,
       stock: updatedProduct[0].StockQuantity,
@@ -344,8 +387,10 @@ export async function PUT(
       supplier: updatedProduct[0].Supplier || 'Unknown supplier',
       image: updatedProduct[0].Image || '/placeholder.svg',
       expiryDate: updatedProduct[0].ExpiryDate ? new Date(updatedProduct[0].ExpiryDate).toISOString() : null,
+      discountType: updatedProduct[0].DiscountType,
+      discountValue: parseFloat(updatedProduct[0].DiscountValue || '0'),
       isActive: updatedProduct[0].IsActive,
-      lastRestocked: updatedProduct[0].UpdatedAt 
+      lastRestocked: updatedProduct[0].UpdatedAt  
         ? new Date(updatedProduct[0].UpdatedAt).toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',

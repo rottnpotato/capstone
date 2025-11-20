@@ -34,23 +34,23 @@ export default function Home() {
   const [loginError, setLoginError] = useState("")
 
   // Handle form submission
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoginError("")
+  // const handleLogin = (e: React.FormEvent) => {
+  //   e.preventDefault()
+  //   setLoginError("")
 
-    // Check email to determine redirect
-    if (email === "admin@cooperative.com") {
-      window.location.href = "/admin"
-    } else if (email === "cashier@cooperative.com") {
-      window.location.href = "/pos"
-    } else if (email === "member@cooperative.com") {
-      window.location.href = "/members"
-    } else {
-      setLoginError(
-        "Invalid email. Please use admin@cooperative.com, cashier@cooperative.com, or member@cooperative.com",
-      )
-    }
-  }
+  //   // Check email to determine redirect
+  //   if (email === "admin@cooperative.com") {
+  //     window.location.href = "/admin"
+  //   } else if (email === "cashier@cooperative.com") {
+  //     window.location.href = "/pos"
+  //   } else if (email === "member@cooperative.com") {
+  //     window.location.href = "/members"
+  //   } else {
+  //     setLoginError(
+  //       "Invalid email. Please use admin@cooperative.com, cashier@cooperative.com, or member@cooperative.com",
+  //     )
+  //   }
+  // }
 
   // Handle scroll for navbar
   useEffect(() => {
@@ -144,7 +144,7 @@ export default function Home() {
                 </a>
               </div>*/}
               <div className="pt-6">
-                <p className="text-sm text-gray-500 mb-3">Trusted by over 2,000 members in our community</p>
+                <p className="text-sm text-gray-500 mb-3">Trusted By Over 2,000 Members In Our Community</p>
                 <div className="flex items-center gap-4">
                   <div className="flex -space-x-2">
                     {[1, 2, 3, 4].map((i) => (
@@ -154,7 +154,7 @@ export default function Home() {
                       />
                     ))}
                   </div>
-                  <span className="text-sm text-gray-600">Join our growing community</span>
+                  <span className="text-sm text-gray-600">Join Our Growing Community</span>
                 </div>
               </div>
             </motion.div>
@@ -443,9 +443,9 @@ export default function Home() {
               <div className="inline-block rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800 mb-4">
                 Access System
               </div>
-              <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">Login to Your Account</h2>
+              <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">Login To Your Account</h2>
               <p className="text-lg text-gray-600 mb-8">
-                Access the Pandol Cooperative POS and Credit Management System
+                Access The Pandol Cooperative POS And Credit Management System
               </p>
 
               <Link href="/login">
@@ -453,7 +453,7 @@ export default function Home() {
                   size="lg"
                   className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
                 >
-                  Go to Login Page
+                  Go To Login Page
                 </Button>
               </Link>
             </motion.div>
@@ -472,9 +472,9 @@ export default function Home() {
               transition={{ duration: 0.5 }}
               className="space-y-6"
             >
-              <h2 className="text-3xl sm:text-4xl font-bold">Get in touch with us</h2>
+                <h2 className="text-3xl sm:text-4xl font-bold">Get In Touch With Us</h2>
               <p className="text-lg text-amber-50">
-                Have questions about our POS and Credit Management system? Reach out to us today.
+                Have Questions About Our POS And Credit Management System? Reach Out To Us Today.
               </p>
               <div className="space-y-4 pt-4">
                 <div className="flex items-start gap-4">
@@ -555,7 +555,7 @@ export default function Home() {
               transition={{ duration: 0.5, delay: 0.2 }}
               className="bg-white/10 backdrop-blur-sm rounded-xl p-6 shadow-lg"
             >
-              <h3 className="text-xl font-bold mb-4">Send us a message</h3>
+              <h3 className="text-xl font-bold mb-4">Send Us a Message</h3>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>

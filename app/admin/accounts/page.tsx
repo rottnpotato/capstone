@@ -550,7 +550,7 @@ export default function AccountsPage() {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Account Management</h1>
-              <p className="text-gray-600">Create and manage member and cashier accounts</p>
+              <p className="text-gray-600">Create And Manage Member And Cashier Accounts</p>
             </div>
 
             <Button
@@ -654,7 +654,7 @@ export default function AccountsPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg font-medium">Accounts</CardTitle>
-              <CardDescription>Manage member and cashier accounts</CardDescription>
+              <CardDescription>Manage Member And Cashier Accounts</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">

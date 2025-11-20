@@ -1,13 +1,16 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { motion } from "framer-motion"
+import { useState, useEffect, useRef, ReactNode, useTransition } from "react";
+import { io, Socket } from "socket.io-client";
+import { motion, AnimatePresence } from "framer-motion";
 import { Navbar } from "@/components/ui/navbar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button, buttonVariants } from "@/components/ui/button"
-import { Package, Search, Plus, ArrowUpDown, MoreHorizontal, Edit, Trash2, AlertCircle, Barcode, Archive } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import jsPDF from "jspdf"
+import autoTable from 'jspdf-autotable'
+import { Package, Search, Plus, ArrowUpDown, MoreHorizontal, Edit, Trash2, AlertCircle, Image as ImageIcon, Archive } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
@@ -16,8 +19,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
-import {
+import { 
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -27,64 +31,44 @@ import {
 } from "@/components/ui/dropdown-menu"
 import Image from "next/image"
 import {
-  DollarSign,
   TrendingUp,
   Package2,
-  TrendingDown,
   FileText,
+  Barcode,
   Download,
 } from "lucide-react"
-import Link from "next/link"
-import { toast } from "@/components/ui/use-toast"
+import { useToast } from "@/components/ui/use-toast"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { desc } from "drizzle-orm"
 
 // Product type definition
 interface Product {
-  id: number
+  id: string
   name: string
   price: number
   basePrice: number
-  profitType: "percentage" | "fixed"
   profitValue: number
-  discountType?: "percentage" | "fixed" // Added discount type
-  discountValue?: number // Added discount value
   category: string
-  image: string
-  sku: string
   stock: number
   description: string
   supplier: string
   lastRestocked: string
+  sku: string
   expiryDate?: string | null
+  image?: string | null
   isActive?: boolean
 }
 
-// Form state type definition
-interface ProductFormState {
-  name: string;
-  price: string;
-  basePrice: string;
-  profitType: "percentage" | "fixed";
-  profitValue: string;
-  discountType: "percentage" | "fixed";
-  discountValue: string;
-  category: string;
-  sku: string;
-  stock: string;
-  description: string;
-  supplier: string;
-  image: string;
-  expiryDate: string; // Assuming date input is string
-  isActive: boolean;
+// Category type definition
+interface Category {
+  id: string
+  name: string
+  description: string
+  createdAt: string
+  updatedAt: string
 }
 
-// Inserted API response type for product listing
-interface ProductsApiResponse {
-  status: 'success' | 'error'
-  products: Product[]
-  message?: string
-}
-
-// Helper functions for date handling, moved outside the component
+// Add helper functions for date handling at the top of the component
 const formatDate = (dateString: string | null | undefined) => {
   if (!dateString) return null;
   
@@ -114,110 +98,143 @@ const isExpiringSoon = (dateString: string | null | undefined) => {
   const date = new Date(dateString);
   if (isNaN(date.getTime())) return false;
   const today = new Date();
-  const sevenDaysFromNow = new Date();
-  sevenDaysFromNow.setDate(today.getDate() + 7);
-  return date > today && date <= sevenDaysFromNow;
+  const oneMonthFromNow = new Date();
+  oneMonthFromNow.setDate(today.getDate() + 30); // Set to 30 days from now
+
+  return date > today && date <= oneMonthFromNow;
 };
 
-// New helper function to get product status, similar to Filament's badgeable column logic
-const getProductStatus = (product: Product) => {
-  if (product.isActive === false) {
-    return {
-      label: "Archived",
-      color: "bg-gray-100 text-gray-600 border-gray-200",
-      priority: 3,
-    };
-  }
-  if (product.expiryDate) {
-    if (isExpired(product.expiryDate)) {
-      return {
-        label: `Expired on ${formatDate(product.expiryDate)}`,
-        color: "bg-red-50 text-red-600 border-red-200",
-        priority: 0,
-      };
-    }
-    if (isExpiringSoon(product.expiryDate)) {
-      return {
-        label: `Expires on ${formatDate(product.expiryDate)}`,
-        color: "bg-amber-50 text-amber-600 border-amber-200",
-        priority: 1,
-      };
-    }
-  }
-  return { label: "Active", color: "bg-green-50 text-green-600 border-green-200", priority: 2 };
+// Add a helper function to determine stock status
+const getStockStatus = (stock: number) => {
+  if (stock < 15) return { color: 'text-red-500', badge: 'Low', bgColor: 'bg-red-100' };
+  return { color: 'text-green-500', badge: null, bgColor: 'bg-green-100' };
 };
+
+interface AlertData {
+  type: 'lowStock' | 'expiry' | 'expired';
+  title: string;
+  message: string;
+  icon: ReactNode;
+  className: string;
+  count: number;
+  filterType: 'lowStock' | 'expiringSoon' | 'expired';
+}
 
 export default function AdminInventoryPage() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("all")
+  const [selectedCategory, setSelectedCategory] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("active") // 'active', 'archived', 'all'
   const [sortBy, setSortBy] = useState("name")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc")
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false)
-  const [isEditProductModalOpen, setIsEditProductModalOpen] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [isProductDetailModalOpen, setIsProductDetailModalOpen] = useState(false)
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
-  
-  // New states for API integration
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false)
+  const [newProductImage, setNewProductImage] = useState<String | null>(null)
+  const[editProductImage, setEditProductImage] = useState<String | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const editFileInputRef = useRef<HTMLInputElement>(null)
   const [products, setProducts] = useState<Product[]>([])
-  const [categories, setCategories] = useState<string[]>(["all"])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [lowStockCount, setLowStockCount] = useState(0)
+  const [category, setCategory] = useState<Category[]>([])
+  const [alerts, setAlerts] = useState<AlertData[]>([]);
+  const [currentAlertIndex, setCurrentAlertIndex] = useState(0);
+  const {toast} = useToast()
+  const [alertFilter, setAlertFilter] = useState<'lowStock' | 'expiringSoon' | 'expired' | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [isLoading, setIsLoading] = useState(false)
   
-  // New state for inventory summary
+  //state for inventory summary (kept from original admin page )
   const [inventorySummary, setInventorySummary] = useState({
     totalValue: 0,
     totalProfit: 0,
     totalStock: 0,
+    totalBaseValue: 0,
   })
 
-  // Form states for Add Product
-  const addFileInputRef = useRef<HTMLInputElement>(null);
-  const [validationErrors, setValidationErrors] = useState<Partial<Record<keyof ProductFormState, string>>>({});
-  const [newProduct, setNewProduct] = useState<ProductFormState>({
-    name: "",
-    price: "",
-    basePrice: "",
-    profitType: "percentage",
-    profitValue: "",
-    discountType: "percentage", // Added
-    discountValue: "", // Added
-    category: "",
-    sku: "",
-    stock: "",
-    description: "",
-    supplier: "",
-    image: "/placeholder.svg",
-    expiryDate: "",
-    isActive: true
-  })
-  
-  // Form states for Edit Product
-  const editFileInputRef = useRef<HTMLInputElement>(null);
-  const [editedProduct, setEditedProduct] = useState<ProductFormState>({
-    name: "",
-    price: "",
-    basePrice: "",
-    profitType: "percentage",
-    profitValue: "",
-    discountType: "percentage", // Added
-    discountValue: "", // Added
-    category: "",
-    sku: "",
-    stock: "",
-    description: "",
-    supplier: "",
-    image: "",
-    expiryDate: "",
-    isActive: true
-  })
-  
-  // Add function to check for products near expiration
+  useEffect(() => {
+    if (products.length > 0) {
+      console.log('Products before filtering:', products);
+      const activeProducts = products.filter(p => p.isActive);
+      // Calculate inventory summary
+      const totalValue = activeProducts.reduce((sum, p) => sum + p.price * p.stock, 0);
+      const totalProfit = activeProducts.reduce((sum, p) => sum + (p.profitValue || 0) * p.stock, 0);
+      const totalBaseValue = activeProducts.reduce((sum, p) => sum + (p.basePrice || 0) * p.stock, 0);
+      const totalStock = activeProducts.reduce((sum, p) => sum + p.stock, 0);
+
+      setInventorySummary({
+        totalValue,
+        totalProfit,
+        totalBaseValue,
+        totalStock,
+      });
+    }
+  }, [products])
+
+  useEffect(() => {
+    const lowStockProducts = products.filter(p => p.stock < 15);
+    const expiringProducts = products.filter(p => p.expiryDate && isExpiringSoon(p.expiryDate) && !isExpired(p.expiryDate));
+    const expiredProducts = products.filter(p => p.expiryDate && isExpired(p.expiryDate));
+
+    const availableAlerts: AlertData[] = [];
+
+    if (expiredProducts.length > 0) {
+      availableAlerts.push({
+        type: 'expiry',
+        title: 'Expired Items Alert (Click to view)',
+        message: `${expiredProducts.length} products have expired. Please remove them from inventory.`,
+        icon: <AlertCircle className="h-5 w-5 text-red-700 flex-shrink-0 mt-0.5" />,
+        className: 'border-red-300 bg-red-100',
+        count: expiredProducts.length,
+        filterType: 'expired',
+      });
+    }
+
+
+    if (expiringProducts.length > 0) {
+      availableAlerts.push({
+        type: 'expiry',
+        title: 'Expiry Alert (Click to view)',
+        message: `${expiringProducts.length} products are expiring within a month.`,
+        icon: <AlertCircle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />,
+        className: 'border-amber-200 bg-amber-50',
+        count: expiringProducts.length,
+        filterType: 'expiringSoon',
+      });
+    }
+
+    if (lowStockProducts.length > 0) {
+      availableAlerts.push({
+        type: 'lowStock',
+        title: 'Low Stock Alert (Click to view)',
+        message: `${lowStockProducts.length} products are running low on stock. Consider restocking soon.`,
+        icon: <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />,
+        className: 'border-red-200 bg-red-50',
+        count: lowStockProducts.length,
+        filterType: 'lowStock',
+      });
+    }
+
+    setAlerts(availableAlerts);
+    setCurrentAlertIndex(0);
+  }, [products]);
+
+  useEffect(() => {
+    if (alerts.length > 1) {
+      const interval = setInterval(() => {
+        setCurrentAlertIndex(prevIndex => (prevIndex + 1) % alerts.length);
+      }, 5000); // Change alert every 5 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [alerts.length]);
+
   const checkForNearExpiryProducts = (productsList: Product[]) => {
-    const nearExpiryProducts = productsList.filter(product => 
-      product.expiryDate && isExpiringSoon(product.expiryDate) && !isExpired(product.expiryDate)
+    const nearExpiryProducts = productsList.filter(product =>
+      product.expiryDate && isExpiringSoon(product.expiryDate) && !isExpired(product.expiryDate)    
     );
-    
+
     if (nearExpiryProducts.length > 0) {
       toast({
         title: "Products Expiring Soon",
@@ -225,11 +242,11 @@ export default function AdminInventoryPage() {
         variant: "destructive",
       });
     }
-    
-    const expiredProducts = productsList.filter(product => 
+
+    const expiredProducts = productsList.filter(product =>
       product.expiryDate && isExpired(product.expiryDate)
     );
-    
+
     if (expiredProducts.length > 0) {
       toast({
         title: "Expired Products",
@@ -238,239 +255,277 @@ export default function AdminInventoryPage() {
       });
     }
   };
+
+  const [newProduct, setNewProduct] = useState({
+  
+    name: "",
+    category: "",
+    price: "",
+    basePrice: "",
+    profitValue: "",
+    stock: "",
+    supplier: "",
+    sku: "",
+    description: "",
+    expiryDate: "",
+    image: null as string | null,
+  })
+  
+  const [editedProduct, setEditedProduct] = useState({
+    id: "",
+    name: "",
+    category: "",
+    price: "",
+    basePrice: "",
+    profitValue: "",
+    stock: "",
+    supplier: "",
+    description: "",
+    sku: "",
+    lastRestocked: "",
+    // profitType: "fixed",
+    expiryDate: "",
+    isActive: true, // Default to active
+    image: null as string | null,
+  })
+  
+  const [updatedStock, setUpdatedStock] = useState("")
+  const [stockUpdateError, setStockUpdateError] = useState("")
+
+  const [errors, setErrors] = useState({
+    name: "",
+    category: "",
+    price: "",
+    basePrice: "",
+    profitValue: "",
+    stock: "",
+    image: "",
+    sku: "",
+    expiryDate: "",
+  })
+
+  const [editErrors, setEditErrors] = useState({
+    name: "",
+    category: "",
+    price: "",
+    basePrice: "",
+    profitValue: "",
+    stock: "",
+    image: "",
+    sku: "",
+    expiryDate: "",
+  })
+
   
   // Calculate price based on base price and profit settings
-  const calculatePrice = (
-    basePrice: string,
-    profitType: "percentage" | "fixed",
-    profitValue: string,
-    discountType: "percentage" | "fixed", // Added
-    discountValue: string // Added
-  ): number => {
+  const calculatePrice = (basePrice: string, profitValue: string): number => {
     const basePriceNum = parseFloat(basePrice);
-    const profitValueNum = parseFloat(profitValue) || 0;
 
-    if (isNaN(basePriceNum)) {
-      return 0;
+    const profitValueNum = parseFloat(profitValue);
+
+    if (isNaN(basePriceNum) || isNaN(profitValueNum)) {
+      return isNaN(basePriceNum) ? 0 : basePriceNum;
     }
-
-    let calculatedPrice;
-    if (profitType === "percentage") {
-      calculatedPrice = basePriceNum * (1 + profitValueNum / 100);
-    } else {
-      calculatedPrice = basePriceNum + profitValueNum;
-    }
-
-    // Apply discount
-    const discountValueNum = parseFloat(discountValue) || 0;
-    if (discountValueNum > 0) {
-      if (discountType === "percentage") {
-        calculatedPrice *= 1 - discountValueNum / 100;
-      } else {
-        calculatedPrice -= discountValueNum;
-      }
-    }
-
-    return Math.max(0, calculatedPrice); // Ensure price doesn't go below zero
+    return basePriceNum + profitValueNum;
   }
   
   // Handle profit type or value change to recalculate price for new product
-  const handleProfitChange = (type: string, value: string) => {
-    const newProfitType = type || newProduct.profitType;
+  const handleProfitChange = (value: string) => {
     const newProfitValue = value || newProduct.profitValue;
     
-    const calculatedPrice = calculatePrice( // No longer needs explicit cast here
-      newProduct.basePrice,
-      newProfitType as "percentage" | "fixed",
-      newProfitValue,
-      newProduct.discountType,
-      newProduct.discountValue
-    );
+    const calculatedPrice = calculatePrice(newProduct.basePrice, newProfitValue);
     
     setNewProduct({
       ...newProduct,
-      profitType: newProfitType as "percentage" | "fixed",
       profitValue: newProfitValue,
       price: calculatedPrice.toFixed(2)
     });
-  }
-  
-  // Handle base price change to recalculate price for new product
-  const handleBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { value } = e.target;
-    const calculatedPrice = calculatePrice(
-      value,
-      newProduct.profitType,
-      newProduct.profitValue,
-      newProduct.discountType,
-      newProduct.discountValue
-    );
     
-    setNewProduct({
-      ...newProduct,
-      basePrice: value,
-      price: calculatedPrice.toFixed(2)
-    });
+    // Clear error when field is updated
+    if (value) {
+      setErrors({
+        ...errors,
+        profitValue: ""
+      });
+    }
   }
-  
-  // Handle discount type or value change to recalculate price for new product
-  const handleDiscountChange = (type: string, value: string) => {
-    const newDiscountType = type || newProduct.discountType;
-    const newDiscountValue = value || newProduct.discountValue;
-
-    const calculatedPrice = calculatePrice(
-      newProduct.basePrice,
-      newProduct.profitType,
-      newProduct.profitValue,
-      newDiscountType as "percentage" | "fixed", // Explicitly cast to the union type
-      newDiscountValue
-    );
-
-    setNewProduct({
-      ...newProduct,
-      discountType: newDiscountType as "percentage" | "fixed",
-      discountValue: newDiscountValue,
-      price: calculatedPrice.toFixed(2)
-    });
-  }
-
-  // Handle profit type or value change to recalculate price for edited product
-  const handleEditProfitChange = (type: string, value: string) => {
-    const newProfitType = (type || editedProduct.profitType); // No longer needs explicit cast here
-    const newProfitValue = value || editedProduct.profitValue;
-    
-    const calculatedPrice = calculatePrice(
-      editedProduct.basePrice,
-      newProfitType as "percentage" | "fixed", // Cast needed here as `type` is string
-      newProfitValue,
-      editedProduct.discountType,
-      editedProduct.discountValue
-    );
-    
-    setEditedProduct({
-      ...editedProduct,
-      profitType: newProfitType as "percentage" | "fixed",
-      profitValue: newProfitValue,
-      price: calculatedPrice.toFixed(2)
-    });
-  }
-  
-  // Handle base price change to recalculate price for edited product
-  const handleEditBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { value } = e.target;
-    const calculatedPrice = calculatePrice(
-      value,
-      editedProduct.profitType,
-      editedProduct.profitValue,
-      editedProduct.discountType,
-      editedProduct.discountValue
-    );
-    
-    setEditedProduct({
-      ...editedProduct,
-      basePrice: value,
-      price: calculatedPrice.toFixed(2)
-    });
-  }
-    // Helper function to get a numerical priority for sorting statuses
-
- const getStatusPriority = (product: Product): number => {
-    return getProductStatus(product).priority;
-  };
-
-// Handle discount type or value change to recalculate price for edited product
-  const handleEditDiscountChange = (type: string, value: string) => {
-    const newDiscountType = (type || editedProduct.discountType); // No longer needs explicit cast here
-    const newDiscountValue = value || editedProduct.discountValue;
-
-    const calculatedPrice = calculatePrice(
-      editedProduct.basePrice,
-      editedProduct.profitType,
-      editedProduct.profitValue,
-      newDiscountType as "percentage" | "fixed", // Cast needed here as `type` is string
-      newDiscountValue
-    );
-
-    setEditedProduct({
-      ...editedProduct,
-      discountType: newDiscountType as "percentage" | "fixed",
-      discountValue: newDiscountValue,
-      price: calculatedPrice.toFixed(2)
-    });
-  }
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, isEditing: boolean) => {
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        if (isEditing) {
-          setEditedProduct(prev => ({ ...prev, image: result }));
+      reader.onloadend = () => { 
+        if (isEdit) {
+          setEditedProduct({ ...editedProduct, image: reader.result as string });
         } else {
-          setNewProduct(prev => ({ ...prev, image: result }));
+          setNewProduct({ ...newProduct, image: reader.result as string });
         }
       };
       reader.readAsDataURL(file);
     }
   };
-
-  // Reset image when modal closes
-  useEffect(() => {
-    if (!isEditProductModalOpen && selectedProduct) setEditedProduct(prev => ({ ...prev, image: selectedProduct.image }));
-  }, [isEditProductModalOpen, selectedProduct]);
-  // Load products on component mount
+  // Load products and set up socket on component mount
   useEffect(() => {
     const fetchProducts = async () => {
-      setIsLoading(true)
+      setIsLoadingProducts(true)
       try {
+        // Call the products API endpoint
         const response = await fetch('/api/products')
-        const data = (await response.json()) as ProductsApiResponse
+        if (!response.ok) {
+          throw new Error('Failed to fetch products')
+        }
         
-        if (data.status === 'success') {
-          setProducts(data.products)
+        const data = await response.json()
+        // console.log("resp prod"+data.toS)
+        //display all response data
+        // data.products.map((element: any) => {
+        //   console.log("value"+element.expiryDate);
+        // });
+
+        if (data.products && Array.isArray(data.products)) {
+          // Map database columns to frontend model
+          const formattedProducts = data.products.map((p: { Products: any; Categories: { Name: any }; category: any }) => {
+            // Handle the case where p.Products is the actual product data (from a join query)
+            const product = p.Products || p;
+            const category = p.Categories ? p.Categories.Name : (p.category || 'uncategorized');
+            console.log("ahsd"+product.expiryDate);
+            // Format the expiry date properly
+            let expiryDate = null;
+            if (product.ExpiryDate || product.expiryDate) {
+              const rawDate = product.ExpiryDate || product.expiryDate;
+              expiryDate = rawDate;
+            }
+            
+            return {
+              id: (product.ProductId || product.id || '').toString(),
+              name: product.Name || product.name || 'Unnamed Product',
+              price: parseFloat(product.Price || product.price || '0'),
+              basePrice: parseFloat(product.BasePrice || product.basePrice || '0'),
+              profitValue: parseFloat(product.Price || product.price || '0') - parseFloat(product.BasePrice || product.basePrice || '0'),
+              profitType: product.ProfitType || product.profitType || 'fixed',
+              category: category,
+              image: product.Image || product.image || '/placeholder.svg',
+              stock: parseInt(product.StockQuantity || product.stock || 0),
+              description: product.Description || product.description || '',
+              supplier: product.Supplier || product.supplier || 'No supplier',
+              lastRestocked: formatDate(product.LastRestocked || product.lastRestocked) || new Date().toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+              }),
+              sku: product.Sku || product.sku || 'NO-SKU',
+              expiryDate: expiryDate,
+              isActive: product.IsActive !== undefined ? product.IsActive : (product.isActive !== undefined ? product.isActive : true)
+            };
+          });
           
-          // Extract unique categories
-          const uniqueCategories = ["all", ...Array.from(new Set(data.products.map((product: Product) => product.category)))]
-          setCategories(uniqueCategories)
-          
-          // Count low stock items
-          const lowStock = data.products.filter((product: Product) => product.stock < 10).length
-          setLowStockCount(lowStock)
+          setProducts(formattedProducts);
+          console.log('Loaded products:', formattedProducts);
           
           // Check for products near expiration
-          checkForNearExpiryProducts(data.products)
-
-          // Calculate inventory summary
-          const totalValue = data.products.reduce((sum: number, p: Product) => sum + p.price * p.stock, 0)
-          const totalProfit = data.products.reduce((sum: number, p: Product) => sum + (p.price - p.basePrice) * p.stock, 0)
-          const totalStock = data.products.reduce((sum: number, p: Product) => sum + p.stock, 0)
-          setInventorySummary({
-            totalValue,
-            totalProfit,
-            totalStock,
-          })
+          checkForNearExpiryProducts(formattedProducts);
         } else {
-          setError(data.message || 'Failed to fetch products')
+          console.log('No products found or invalid data structure:', data);
         }
-      } catch (err) {
-        setError('Error loading products. Please try again later.')
-        console.error('Error fetching products:', err)
+      } catch (error) {
+        console.error('Error fetching products:', error)
+        toast({
+          title: "Error",
+          description: "Failed to load products. Please try again.",
+          variant: "destructive"
+        })
       } finally {
-        setIsLoading(false)
+        setIsLoadingProducts(false)
       }
     }
-    
+
+    const fetchCategories = async () => {
+      // setIsLoadingProducts(true)
+      try {
+        // Call the products API endpoint
+        const response = await fetch('/api/category')
+        if (!response.ok) {
+          throw new Error('Failed to fetch products')
+        }
+        
+        const data = await response.json()
+        if (data.categories && Array.isArray(data.categories)) {
+          // Map database columns to frontend model
+          const formattedCategories: Category[] = data.categories.map((c: Category) => {
+            return {
+              id: c.id.toString(),
+              name: c.name || 'Unnamed Category',
+              description: c.description || '',
+              createdAt: c.createdAt || new Date().toLocaleDateString(),
+              updatedAt: c.updatedAt || new Date().toLocaleDateString()
+            };
+          });
+
+          setCategory(formattedCategories);
+          console.log('Loaded Category:', formattedCategories);
+        } else {
+          console.log('No categories found or invalid data structure:', data);
+        }
+      } catch (error) {
+        console.error('Error fetching category:', error)
+        toast({
+          title: "Error",
+          description: "Failed to load category. Please try again.",
+          variant: "destructive"
+        })
+      } finally {
+        setIsLoadingProducts(false)
+      }
+    }
+
+    fetchCategories()
     fetchProducts()
+
+    // Initialize socket connection
+    const socket: Socket = io();
+
+    // Listen for real-time product updates
+    socket.on('product_updated', (updatedProduct: Product) => {
+      console.log('Product update received:', updatedProduct);
+      setProducts(prevProducts =>
+        prevProducts.map(p => (p.id === updatedProduct.id ? { ...p, ...updatedProduct } : p))
+      );
+      toast({
+        title: "Inventory Updated",
+        description: `${updatedProduct.name} has been updated in real-time.`,
+      });
+    });
+
+    socket.on('connect', () => {
+      console.log('Connected to inventory socket');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Disconnected from inventory socket');
+    });
+
+    // Cleanup on unmount
+    return () => {
+      socket.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Filter and sort products
   const filteredProducts = products
     .filter((product) => {
-      const matchesSearch =
-        product.name.toLowerCase().includes(searchQuery.toLowerCase()) || product.sku.includes(searchQuery)
-      const matchesCategory = categoryFilter === "all" || product.category === categoryFilter
-      return matchesSearch && matchesCategory
+      const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchesCategory = selectedCategory === "all" || product.category === selectedCategory;
+      const matchesStatus = 
+        statusFilter === 'all' ||
+        (statusFilter === 'active' && product.isActive) ||
+        (statusFilter === 'archived' && !product.isActive);
+      
+      const matchesAlertFilter = !alertFilter ||
+        (alertFilter === 'lowStock' && product.stock < 15) ||
+        (alertFilter === 'expiringSoon' && product.expiryDate && isExpiringSoon(product.expiryDate) && !isExpired(product.expiryDate)) ||
+        (alertFilter === 'expired' && product.expiryDate && isExpired(product.expiryDate));
+
+      return matchesSearch && matchesCategory && matchesStatus && matchesAlertFilter;
     })
     .sort((a, b) => {
       let comparison = 0
@@ -485,14 +540,21 @@ export default function AdminInventoryPage() {
         case "stock":
           comparison = a.stock - b.stock
           break
-        case "status":
-          const statusA = getStatusPriority(a);
-          const statusB = getStatusPriority(b);
-          comparison = statusA - statusB;
+        case "expiryDate": {
+          const dateA = a.expiryDate ? new Date(a.expiryDate).getTime() : null
+          const dateB = b.expiryDate ? new Date(b.expiryDate).getTime() : null
+
+          if (dateA === null && dateB === null) {
+            comparison = 0
+          } else if (dateA === null) {
+            comparison = 1 // Sort nulls to the end
+          } else if (dateB === null) {
+            comparison = -1 // Sort nulls to the end
+          } else {
+            comparison = dateA - dateB
+          }
           break
-        case "category":
-          comparison = a.category.localeCompare(b.category)
-          break
+        }
         default:
           comparison = 0
       }
@@ -500,400 +562,386 @@ export default function AdminInventoryPage() {
       return sortOrder === "asc" ? comparison : -comparison
     })
 
-  // Handle edit product
-  const handleEditProduct = (product: Product) => {
-    if (!product) {
-      console.error("handleEditProduct: product is null or undefined");
-      return;
-    }
+  // Handle product click to view details
+  const handleProductClick = (product: Product) => {
     setSelectedProduct(product)
+    setUpdatedStock(product.stock.toString()) // Initialize with current stock
+    setStockUpdateError("") // Clear any previous errors
+    setIsEditMode(false) // Default to view mode when clicking a product
+    setIsProductDetailModalOpen(true)
+    // Also initialize editedProduct for the edit tab, even if not immediately in edit mode
     setEditedProduct({
-      name: product.name ?? "",
-      price: product.price != null ? product.price.toString() : "",
-      basePrice: product.basePrice != null ? product.basePrice.toString() : "",
-      profitType: (product.profitType ?? "percentage") as "percentage" | "fixed", // Explicitly cast
-      profitValue: product.profitValue != null ? product.profitValue.toString() : "",
-      discountType: (product.discountType ?? "percentage") as "percentage" | "fixed", // Explicitly cast
-      discountValue: product.discountValue != null ? product.discountValue.toString() : "", // Added
-      category: product.category ?? "",
-      sku: product.sku ?? "",
-      stock: product.stock != null ? product.stock.toString() : "",
-      description: product.description ?? "",
-      supplier: product.supplier ?? "",
-      image: product.image ?? "/placeholder.svg",
-      expiryDate: product.expiryDate ?? "",
-      isActive: product.isActive != null ? product.isActive : true
-    })
-    setIsEditProductModalOpen(true)
-  }
-
-  // Handle view product
-  const handleViewProduct = (product: Product) => {
-    setSelectedProduct(product)
-    setIsEditProductModalOpen(false)
-    setIsDeleteConfirmOpen(false)
-  }
-
-  // Handle delete product
-  const handleDeleteProduct = (product: Product) => {
-    setSelectedProduct(product)
-    setIsDeleteConfirmOpen(true)
-  }
-  
-  // Handle generating reports
-  const handleGenerateReport = (format: "csv" | "pdf") => {
-    toast({
-      title: "Generating Report...",
-      description: `Your inventory report is being generated in ${format.toUpperCase()} format.`,
-      variant: "default",
-    })
-    // Placeholder for actual report generation logic
-  }
-
-  // Handle add product submission
-  const handleAddProduct = async () => {
-    setValidationErrors({});
-    const errors: Partial<Record<keyof ProductFormState, string>> = {};
-
-    if (!newProduct.name.trim()) errors.name = "Product name is required.";
-    if (!newProduct.basePrice.trim() || parseFloat(newProduct.basePrice) <= 0) errors.basePrice = "A valid base price is required.";
-    if (!newProduct.category.trim() || newProduct.category === "new-category") errors.category = "Category is required.";
-    if (!newProduct.sku.trim()) errors.sku = "SKU/Barcode is required.";
-    if (!newProduct.stock.trim() || parseInt(newProduct.stock, 10) < 0) errors.stock = "A valid initial stock is required.";
-
-    if (Object.keys(errors).length > 0) {
-      setValidationErrors(errors);
-      toast({
-        title: "Validation Error",
-        description: "Please fill in all required fields correctly.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      // Validate stock is not negative
-      const stockValue = parseInt(newProduct.stock) || 0
-      if (stockValue < 0) {
-        toast({
-          title: "Invalid Stock Value",
-          description: "Stock cannot be negative.",
-          variant: "destructive",
-        })
-        return
-      }
-
-      const response = await fetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newProduct.name,
-          price: parseFloat(newProduct.price),
-          basePrice: parseFloat(newProduct.basePrice),
-          profitType: newProduct.profitType,
-          profitValue: parseFloat(newProduct.profitValue),
-          discountType: newProduct.discountType, // Added
-          discountValue: parseFloat(newProduct.discountValue) || 0, // Added
-          category: newProduct.category,
-          sku: newProduct.sku,
-          stock: stockValue,
-          description: newProduct.description,
-          supplier: newProduct.supplier,
-          image: newProduct.image,
-          expiryDate: newProduct.expiryDate || null,
-          isActive: newProduct.isActive
-        })
-      })
-      
-      const data = await response.json()
-      
-      if (data.status === 'success') {
-        // Add the new product to the state
-        const updatedProducts = [...products, data.product];
-        setProducts(updatedProducts)
-        
-        // Reset form and close modal
-        setNewProduct({
-          name: "",
-          price: "",
-          basePrice: "",
-          profitType: "percentage",
-          profitValue: "",
-          discountType: "percentage", // Added
-          discountValue: "", // Added
-          category: "",
-          sku: "",
-          stock: "",
-          description: "",
-          supplier: "",
-          image: "/placeholder.svg",
-          expiryDate: "",
-          isActive: true
-        });
-        setValidationErrors({});
-        setIsAddProductModalOpen(false)
-        
-        // Show enhanced success toast
-        toast({
-          title: "Product Added Successfully",
-          description: `${data.product.name} has been added to inventory with ${data.product.stock} units.`,
-          variant: "default"
-        })
-        
-        // Check if we need to add a new category
-        if (!categories.includes(data.product.category)) {
-          setCategories([...categories, data.product.category])
-        }
-        
-        // Check for products near expiration
-        checkForNearExpiryProducts(updatedProducts)
-      } else {
-        toast({
-          title: "Failed to Add Product",
-          description: data.message || "An error occurred while adding the product. Please try again.",
-          variant: "destructive"
-        })
-      }
-    } catch (err) {
-      console.error('Error adding product:', err)
-      toast({
-        title: "Failed to Add Product",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive"
-      })
-    }
-  }
-  
-  // Handle edit product submission
-  const handleSaveEdit = async () => {
-    if (!selectedProduct) return
-    
-    try {
-      // Validate form
-      if (!editedProduct.name || !editedProduct.price || !editedProduct.category) {
-        toast({
-          title: "Missing Required Fields",
-          description: "Please fill in all required fields: name, price, and category.",
-          variant: "destructive"
-        })
-        return
-      }
-      
-      // Validate stock is not negative
-      const stockValue = parseInt(editedProduct.stock) || 0
-      if (stockValue < 0) {
-        toast({
-          title: "Invalid Stock Value",
-          description: "Stock cannot be negative.",
-          variant: "destructive"
-        })
-        return
-      }
-      
-      const response = await fetch(`/api/products/${selectedProduct.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editedProduct.name,
-          price: parseFloat(editedProduct.price),
-          basePrice: parseFloat(editedProduct.basePrice),
-          profitType: editedProduct.profitType,
-          profitValue: parseFloat(editedProduct.profitValue),
-          discountType: editedProduct.discountType, // Added
-          discountValue: parseFloat(editedProduct.discountValue) || 0, // Added
-          category: editedProduct.category,
-          sku: editedProduct.sku,
-          stock: stockValue,
-          description: editedProduct.description,
-          supplier: editedProduct.supplier,
-          image: editedProduct.image,
-          expiryDate: editedProduct.expiryDate || null,
-          isActive: editedProduct.isActive
-        })
-      })
-      
-      const data = await response.json()
-      
-      if (data.status === 'success') {
-        // Update product in the state
-        const updatedProducts = products.map(p => p.id === selectedProduct.id ? data.product : p);
-        setProducts(updatedProducts)
-        
-        // Close modal
-        setIsEditProductModalOpen(false)
-        
-        // Show enhanced success toast
-        toast({
-          title: "Product Updated Successfully",
-          description: `${data.product.name} has been updated with the latest information.`,
-          variant: "default"
-        })
-        
-        // Check if we need to add a new category
-        if (!categories.includes(data.product.category)) {
-          setCategories([...categories, data.product.category])
-        }
-        
-        // Check for products near expiration
-        checkForNearExpiryProducts(updatedProducts)
-
-        // Recalculate summary on edit
-        const totalValue = updatedProducts.reduce((sum: number, p: Product) => sum + p.price * p.stock, 0)
-        const totalProfit = updatedProducts.reduce((sum: number, p: Product) => sum + (p.price - p.basePrice) * p.stock, 0)
-        const totalStock = updatedProducts.reduce((sum: number, p: Product) => sum + p.stock, 0)
-        setInventorySummary({ totalValue, totalProfit, totalStock })
-      } else {
-
-
-        toast({
-          title: "Failed to Update Product",
-          description: data.message || "An error occurred while updating the product. Please try again.",
-          variant: "destructive"
-        })
-      }
-    } catch (err) {
-      console.error('Error updating product:', err)
-      toast({
-        title: "Failed to Update Product",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive"
-      })
-    }
-  }
-  
-  // Handle delete product submission
-  const handleConfirmDelete = async () => {
-    if (!selectedProduct) return
-    
-    try {
-      const response = await fetch(`/api/products/${selectedProduct.id}`, {
-        method: 'DELETE'
-      })
-      
-      const data = await response.json()
-      
-      if (data.status === 'success') {
-        // Remove product from the state
-        const updatedProducts = products.filter(p => p.id !== selectedProduct.id);
-        setProducts(updatedProducts)
-        
-        // Close modal
-        setIsDeleteConfirmOpen(false)
-        
-        // Show enhanced success toast
-        toast({
-          title: "Product Archived Successfully",
-          description: `${selectedProduct.name} has been archived and will no longer appear in the POS system.`,
-          variant: "default"
-        })
-        
-        // Update low stock count
-        setLowStockCount(updatedProducts.filter(p => p.stock < 10).length)
-
-        // Recalculate summary on delete
-        const totalValue = updatedProducts.reduce((sum, p) => sum + p.price * p.stock, 0)
-        const totalProfit = updatedProducts.reduce((sum, p) => sum + (p.price - p.basePrice) * p.stock, 0)
-        const totalStock = updatedProducts.reduce((sum, p) => sum + p.stock, 0)
-        setInventorySummary({ totalValue, totalProfit, totalStock })
-
-      } else {
-        toast({
-          title: "Failed to Archive Product",
-          description: data.message || "An error occurred while archiving the product. Please try again.",
-          variant: "destructive"
-        })
-      }
-    } catch (err) {
-      console.error('Error deleting product:', err)
-      toast({
-        title: "Failed to Archive Product",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive"
-      })
-    }
-  }
-  
-  // Handle stock update
-  const handleUpdateStock = async (product: Product) => {
-    setSelectedProduct(product)
-    setEditedProduct({
+      id: product.id,
       name: product.name,
+      category: product.category,
       price: product.price.toString(),
       basePrice: product.basePrice.toString(),
-      profitType: product.profitType as "percentage" | "fixed", // Explicitly cast
+      // profitType: "fixed", // Default to fixed as per previous change
       profitValue: product.profitValue.toString(),
-      discountType: (product.discountType ?? "percentage") as "percentage" | "fixed", // Explicitly cast
-      discountValue: product.discountValue != null ? product.discountValue.toString() : "", // Added
-      category: product.category,
-      sku: product.sku,
       stock: product.stock.toString(),
-      description: product.description || "",
-      supplier: product.supplier || "",
-      image: product.image || "/placeholder.svg",
+      supplier: product.supplier,
+      description: product.description,
+      sku: product.sku,
+      lastRestocked: product.lastRestocked,
       expiryDate: product.expiryDate || "",
-      isActive: product.isActive !== undefined ? product.isActive : true
-    })
-    setIsEditProductModalOpen(true)
+      isActive: product.isActive ?? true,
+      image: product.image || null,
+    });
   }
 
-  // Enhanced helper functions for stock status
-  const getStockStatus = (stock: number) => {
-    if (stock <= 15) return { color: 'text-red-600', badge: 'Low', bgColor: 'bg-red-100', indicator: 'bg-red-500' };
+  // Toggle sort order
+  const toggleSortOrder = () => {
+    setSortOrder(sortOrder === "asc" ? "desc" : "asc")
+  }
+  
+  // Handle base price change to recalculate price for new product
+  const handleBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = e.target;
+    const calculatedPrice = calculatePrice(value, newProduct.profitValue);
+    
+    setNewProduct({
+      ...newProduct,
+      basePrice: value,
+      price: calculatedPrice.toFixed(2)
+    });
+    
+    // Clear error when field is updated
+    setErrors({
+      ...errors,
+      basePrice: ""
+    });
+  }
 
-    return { color: 'text-green-600', badge: null, bgColor: 'bg-green-100', indicator: 'bg-green-500' };
+  // Generate a random SKU if empty
+  const generateSKU = () => {
+    const categoryPrefix = (newProduct.category || "UNC").substring(0, 3).toUpperCase();
+    const namePrefix = (newProduct.name || "PROD").substring(0, 3).toUpperCase();
+    const timestamp = Date.now().toString().slice(-5);
+    const randomChars = Math.random().toString(36).substring(2, 4).toUpperCase();
+    const sku = `${categoryPrefix}-${namePrefix}-${timestamp}${randomChars}`;
+    
+    setNewProduct({
+      ...newProduct,
+      sku
+    });
+    toast({ title: "SKU Generated", description: `New SKU: ${sku}` });
   };
 
-  // Add this function to handle activating archived products
-  const handleActivateProduct = async (product: Product) => {
+  const handleAddProduct = () => {
+    // TODO: Logic to add product
+    console.log("Adding Product:", newProduct);
+    toast({
+      title: "Product Added",
+      description: `${newProduct.name} has been added.`,
+    });
+    setIsAddProductModalOpen(false);
+  };
+
+  const validateEditForm = (): boolean => {
+    const newErrors = { name: "", category: "", price: "", basePrice: "", profitValue: "", stock: "", image: "", sku: "", expiryDate: "" };
+    let isValid = true;
+
+    if (!editedProduct.name.trim()) {
+      newErrors.name = "Product Name Is Required";
+      isValid = false;
+    }
+    if (!editedProduct.category) {
+      newErrors.category = "Category Is Required";
+      isValid = false;
+    }
+    if (!editedProduct.basePrice || parseFloat(editedProduct.basePrice) < 0) {
+      newErrors.basePrice = "Valid Base Price Is Required";
+      isValid = false;
+    }
+    if (!editedProduct.price || parseFloat(editedProduct.price) <= 0) {
+      newErrors.price = "Valid Price Is Required";
+      isValid = false;
+    }
+    if (!editedProduct.stock) {
+      newErrors.stock = "Stock Quantity Is Required";
+      isValid = false;
+    }
+    if (!editedProduct.sku.trim()) {
+      newErrors.sku = "SKU Is Required";
+      isValid = false;
+    }
+    if (!editedProduct.image) {
+      newErrors.image = "Image Is Required";
+      isValid = false;
+    }
+
+    setEditErrors(newErrors);
+    return isValid;
+  }
+
+  const handleSaveEdit = async () => {
+    if (!validateEditForm()) return;
+
+    setIsLoading(true);
     try {
-      const response = await fetch(`/api/products/${product.id}/activate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+      const productData = {
+        ...editedProduct,
+        price: parseFloat(editedProduct.price),
+        basePrice: parseFloat(editedProduct.basePrice),
+        profitValue: parseFloat(editedProduct.profitValue),
+        stock: parseInt(editedProduct.stock),
+      };
+
+      const response = await fetch(`/api/products/${editedProduct.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(productData),
       });
-      
-      const data = await response.json();
-      
-      if (data.status === 'success') {
-        // Update product in the state
-        const updatedProducts = products.map(p => p.id === product.id ? { ...p, isActive: true } : p);
-        setProducts(updatedProducts);
-        
-        // Show enhanced success toast
-        toast({
-          title: "Product Activated Successfully",
-          description: `${product.name} has been restored to active status and will now appear in the POS system.`,
-          variant: "default"
-        });
-        
-        // Check for products near expiration
-        checkForNearExpiryProducts(updatedProducts);
-      } else {
-        toast({
-          title: "Failed to Activate Product",
-          description: data.message || "An error occurred while activating the product. Please try again.",
-          variant: "destructive"
-        });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update product');
       }
-    } catch (err) {
-      console.error('Error activating product:', err);
+
+      const updatedProduct = await response.json();
+
+      // The local state will be updated via WebSocket broadcast, so no need to setProducts here.
+      
       toast({
-        title: "Failed to Activate Product",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive"
+        title: "Product Updated",
+        description: `${editedProduct.name} has been updated successfully.`,
       });
+      setIsEditMode(false); // Use setIsEditMode
+    } catch (error) {
+      console.error("Error Updating Product:", error);
+      toast({
+        title: "Update Failed",
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+    setIsProductDetailModalOpen(false); // Close the main detail modal
+    setIsEditMode(false); // Exit edit mode
+    
+  };
+
+  const handleConfirmDelete = () => {
+    if (selectedProduct) {
+      // Logic to delete product
+      console.log("Deleting Product:", selectedProduct.id);
+      toast({
+        title: "Product Deleted",
+        description: `${selectedProduct.name} has been deleted.`,
+        variant: "destructive",
+      });
+      setIsDeleteConfirmOpen(false);
+      setSelectedProduct(null);
+    }
+  };
+
+  const handleEditProduct = (product: Product) => {
+    setEditedProduct({
+      id: product.id,
+      name: product.name,
+      category: product.category,
+      price: product.price.toString(),
+      // @ts-ignore
+      basePrice: product.basePrice.toString(),
+      // profitType: "fixed", // Set default profit type
+      profitValue: product.profitValue.toString(),
+      stock: product.stock.toString(),
+      supplier: product.supplier,
+      description: product.description,
+      sku: product.sku,
+      lastRestocked: product.lastRestocked,
+      expiryDate: product.expiryDate || "",
+      isActive: product.isActive ?? true, image: product.image || null
+    });
+    // setSelectedProduct(product); // Set selected product for the detail modal
+    // setIsEditMode(true); // Switch to edit mode
+    // setIsProductDetailModalOpen(true); // Open the detail modal
+  };  
+
+  const handleEditBasePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = e.target;
+    const calculatedPrice = calculatePrice(value, editedProduct.profitValue);
+    
+    setEditedProduct({
+      ...editedProduct,
+      basePrice: value,
+      price: calculatedPrice.toFixed(2)
+    });
+  };
+
+  const handleEditProfitChange = (value: string) => {
+    const newProfitValue = value || editedProduct.profitValue;
+    
+    const calculatedPrice = calculatePrice(editedProduct.basePrice, newProfitValue);
+    
+    setEditedProduct({
+      ...editedProduct,
+      profitValue: newProfitValue,
+      price: calculatedPrice.toFixed(2)
+    });
+  };
+
+  const handleDiscountChange = (type: string, value: string) => {
+    // Dummy function, as discount fields are not in state
+    console.log("Discount Changed", type, value);
+  };
+
+  const handleEditDiscountChange = (type: string, value: string) => {
+    // Dummy function, as discount fields are not in state
+    console.log("Edit Discount Changed", type, value);
+  };
+
+  const handleArchiveProduct = async (productId: string) => {
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/products/${productId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isActive: false }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to archive product');
+        }
+
+        setProducts(products => products.map(p => p.id === productId ? { ...p, isActive: false } : p));
+        toast({ title: "Product Archived", description: "The product has been successfully archived." });
+      } catch (error) {
+        console.error("Error archiving product:", error);
+        toast({ title: "Error", description: "Failed to archive product.", variant: "destructive" });
+      }
+    });
+  };
+
+  const handleRestoreProduct = async (productId: string) => {
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/products/${productId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isActive: true }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to restore product');
+        }
+
+        setProducts(products => products.map(p => p.id === productId ? { ...p, isActive: true } : p));
+        toast({ title: "Product Restored", description: "The product has been successfully restored." });
+      } catch (error) {
+        console.error("Error restoring product:", error);
+        toast({ title: "Error", description: "Failed to restore product.", variant: "destructive" });
+      }
+    });
+  };
+
+
+  // Handle generating reports
+  const handleGenerateReport = (format: "csv" | "pdf") => {
+    if (format === "csv") {
+      toast({
+        title: "Generating CSV...",
+        description: "Your inventory data is being prepared for download.",
+      });
+
+      const headers = [
+        "ID", "Name", "SKU", "Category", "Stock", "Base Price", "Price",
+        "Supplier", "Last Restocked", "Expiry Date", "Is Active", "Description"
+      ];
+
+      const csvRows = [headers.join(',')];
+
+      const escapeCsvCell = (cellData: any) => {
+        if (cellData === null || cellData === undefined) {
+          return '';
+        }
+        const stringData = String(cellData);
+        if (stringData.includes(',') || stringData.includes('"') || stringData.includes('\n')) {
+          return `"${stringData.replace(/"/g, '""')}"`;
+        }
+        return stringData;
+      };
+
+      products.forEach(product => {
+        const row = [
+          escapeCsvCell(product.id),
+          escapeCsvCell(product.name),
+          escapeCsvCell(product.sku),
+          escapeCsvCell(product.category),
+          escapeCsvCell(product.stock),
+          escapeCsvCell(product.basePrice.toFixed(2)),
+          escapeCsvCell(product.price.toFixed(2)),
+          escapeCsvCell(product.supplier),
+          escapeCsvCell(product.lastRestocked),
+          escapeCsvCell(formatDate(product.expiryDate) || 'N/A'),
+          escapeCsvCell(product.isActive ? 'Yes' : 'No'),
+          escapeCsvCell(product.description),
+        ];
+        csvRows.push(row.join(','));
+      });
+
+      const csvString = csvRows.join('\n');
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'inventory_report.csv');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } else if (format === "pdf") {
+      toast({
+        title: "Generating PDF...",
+        description: "Your inventory report is being prepared for download.",
+        variant: "default",
+      });
+
+      const doc = new jsPDF();
+      
+      doc.text("Inventory Report", 14, 16);
+      doc.setFontSize(10);
+      doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+
+      const head = [
+        ["ID", "Name", "SKU", "Category", "Stock", "Base Price", "Price", "Expiry Date"],
+      ];
+
+      const body = products.map(product => [
+        product.id,
+        product.name,
+        product.sku,
+        product.category,
+        product.stock,
+        `₱${product.basePrice.toFixed(2)}`,
+        `₱${product.price.toFixed(2)}`,
+        formatDate(product.expiryDate) || 'N/A',
+      ]);
+
+      autoTable(doc, {
+        head: head,
+        body: body,
+        theme: 'striped',
+        headStyles: { fillColor: [255, 165, 0] }, // Orange color for header
+      });
+
+      doc.save('inventory_report.pdf');
     }
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar userType="admin" userName="Admin User" />
+      <Navbar userType="admin" userName="Admin" />
 
       <main className="pt-16 pb-20">
         <div className="container mx-auto px-4 py-8">
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between mb-8">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Inventory Management</h1>
-              <p className="text-gray-600">Manage and track product inventory</p>
+              <p className="text-gray-600">Manage And Track Product Inventory</p>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
@@ -908,11 +956,11 @@ export default function AdminInventoryPage() {
           </div>
 
           {/* Inventory Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium">Total Inventory Value</CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
+                {/* <DollarSign className="h-4 w-4 text-muted-foreground" /> */}
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
@@ -921,6 +969,19 @@ export default function AdminInventoryPage() {
                 <p className="text-xs text-muted-foreground">Estimated value of all products</p>
               </CardContent>
             </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Total Base Value</CardTitle>
+                {/* <DollarSign className="h-4 w-4 text-muted-foreground" /> */}
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  ₱{inventorySummary.totalBaseValue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <p className="text-xs text-muted-foreground">Total cost of all products</p>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium">Potential Profit</CardTitle>
@@ -955,28 +1016,40 @@ export default function AdminInventoryPage() {
           </div>
 
           {/* Filters and Search */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <Input
                 type="text"
-                placeholder="Search products by name or barcode..."
+                placeholder="Search products by name..."
                 className="pl-10"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
 
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
               <SelectTrigger>
-                <SelectValue placeholder="Filter by category" />
+                <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>
-                {categories.map((category) => (
-                  <SelectItem key={category} value={category} className="capitalize">
-                    {category === "all" ? "All Categories" : category}
+                <SelectItem value="all">All Categories</SelectItem>
+                {category.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.name} className="capitalize">
+                    {cat.name}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
+                <SelectItem value="all">All Products</SelectItem>
               </SelectContent>
             </Select>
 
@@ -989,31 +1062,58 @@ export default function AdminInventoryPage() {
                   <SelectItem value="name">Name</SelectItem>
                   <SelectItem value="price">Price</SelectItem>
                   <SelectItem value="stock">Stock</SelectItem>
-                  <SelectItem value="status">Status</SelectItem>
+                  <SelectItem value="expiryDate">Expiry Date</SelectItem>
                 </SelectContent>
               </Select>
 
-              <Button variant="outline" size="icon" onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}>
+              <Button variant="outline" size="icon" onClick={toggleSortOrder}>
                 <ArrowUpDown className={`h-4 w-4 ${sortOrder === "desc" ? "rotate-180" : ""} transition-transform`} />
               </Button>
             </div>
           </div>
 
-          {/* Low Stock Alert */}
-          {lowStockCount > 0 && (
-            <Card className="mb-6 border-red-200 bg-red-50">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h3 className="font-medium text-gray-900">Low Stock Alert</h3>
-                    <p className="text-sm text-gray-600">
-                      {lowStockCount} products are running low on stock. Consider restocking soon.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          {alertFilter && (
+            <div className="mb-6 flex items-center justify-center">
+              <Badge variant="secondary" className="p-2 text-sm">
+                Filtering by: {
+                  { lowStock: 'Low Stock', expiringSoon: 'Expiring Soon', expired: 'Expired' }[alertFilter]
+                }
+                <Button variant="ghost" size="sm" className="h-auto p-0 ml-2 text-red-500 hover:bg-transparent" onClick={() => setAlertFilter(null)}>
+                  &times; Clear
+                </Button>
+              </Badge>
+            </div>
+          )}
+
+          {/* Animated Alerts Widget */}
+          {alerts.length > 0 && (
+            <div className="relative h-20 mb-6 overflow-hidden">
+              <AnimatePresence initial={false}>
+                <motion.div
+                  key={currentAlertIndex}
+                  initial={{ y: '100%', opacity: 0 }}
+                  animate={{ y: '0%', opacity: 1 }}
+                  exit={{ y: '-100%', opacity: 0 }}
+                  transition={{ duration: 0.5, ease: 'easeInOut' }}
+                  className="absolute w-full"
+                >
+                  <Card 
+                    className={`${alerts[currentAlertIndex].className} cursor-pointer hover:shadow-md transition-shadow`}
+                    onClick={() => setAlertFilter(alerts[currentAlertIndex].type === 'lowStock' ? 'lowStock' : (alerts[currentAlertIndex].title.includes('Expired') ? 'expired' : 'expiringSoon'))}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3">
+                        {alerts[currentAlertIndex].icon}
+                        <div>
+                          <h3 className="font-medium text-gray-900">{alerts[currentAlertIndex].title}</h3>
+                          <p className="text-sm text-gray-600">{alerts[currentAlertIndex].message}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </AnimatePresence>
+            </div>
           )}
 
           {/* Products Table */}
@@ -1022,147 +1122,187 @@ export default function AdminInventoryPage() {
               <CardTitle className="text-lg font-medium">Product Inventory</CardTitle>
             </CardHeader>
             <CardContent>
-              {isLoading ? (
-                <div className="py-12 text-center">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-amber-500 border-r-transparent mb-4"></div>
-                  <p className="text-gray-600">Loading inventory data...</p>
-                </div>
-              ) : error ? (
-                <div className="py-12 text-center">
-                  <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-4" />
-                  <p className="text-gray-900 font-medium">{error}</p>
-                  <p className="text-gray-600 mt-1">Please try refreshing the page.</p>
-                </div>
-              ) : filteredProducts.length === 0 ? (
-                <div className="py-12 text-center">
-                  <Package className="h-8 w-8 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-900 font-medium">No products found</p>
-                  <p className="text-gray-600 mt-1">
-                    {products.length === 0 ? "Add your first product to get started!" : "Try adjusting your filters"}
-                  </p>
+              {isLoadingProducts ? (
+                <div className="py-10 text-center">
+                  <p className="text-gray-500">Loading products...</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-100 text-gray-600 text-sm">
+                  <table className="min-w-full">
+                    <thead className="bg-gray-50 text-gray-600 text-sm">
                       <tr>
-                        <th className="px-4 py-3 text-left">Product</th>
-                        <th className="px-4 py-3 text-left hidden md:table-cell">
-                          <div className="flex items-center">
-                            Category
-                            <Button variant="ghost" size="sm" className="ml-1 h-6 w-6 p-0" onClick={() => setSortBy("category")}>
-                              <ArrowUpDown className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </th>
-                        <th className="px-4 py-3 text-left">
-                          <div className="flex items-center">
+                        <th className="py-3 px-4 text-left">Product</th>
+                        <th className="py-3 px-4 text-left">SKU</th>
+                        <th className="py-3 px-4 text-left">Category</th>
+                        <th className="py-3 px-4 text-left">
+                          <button
+                            className="flex items-center gap-1"
+                            onClick={() => {
+                              setSortBy("price")
+                              toggleSortOrder()
+                            }}
+                          >
                             Price
-                            <Button variant="ghost" size="sm" className="ml-1 h-6 w-6 p-0" onClick={() => setSortBy("price")}>
-                              <ArrowUpDown className="h-3 w-3" />
-                            </Button>
-                          </div>
+                            {sortBy === "price" && (
+                              <ArrowUpDown className={`h-3 w-3 transition-transform ${sortOrder === "desc" ? "rotate-180" : ""}`} />
+                            )}
+                          </button>
                         </th>
-                        <th className="px-4 py-3 text-left">
-                          <div className="flex items-center">
+                        <th className="py-3 px-4 text-left">
+                          <button
+                            className="flex items-center gap-1"
+                            onClick={() => {
+                              setSortBy("stock")
+                              toggleSortOrder()
+                            }}
+                          >
                             Stock
-                            <Button variant="ghost" size="sm" className="ml-1 h-6 w-6 p-0" onClick={() => setSortBy("stock")}>
-                              <ArrowUpDown className="h-3 w-3" />
-                            </Button>
-                          </div>
+                            {sortBy === "stock" && (
+                              <ArrowUpDown className={`h-3 w-3 transition-transform ${sortOrder === "desc" ? "rotate-180" : ""}`} />
+                            )}
+                          </button>
                         </th>
-                        <th className="px-4 py-3 text-left">
-                          <div className="flex items-center">
-                            Status
-                            <Button variant="ghost" size="sm" className="ml-1 h-6 w-6 p-0" onClick={() => setSortBy("status")}>
-                              <ArrowUpDown className="h-3 w-3" />
-                            </Button>
-                          </div>
+                        <th className="py-3 px-4 text-left">
+                          <button
+                            className="flex items-center gap-1"
+                            onClick={() => {
+                              setSortBy("expiryDate")
+                              toggleSortOrder()
+                            }}
+                          >
+                            Expiry Date
+                            {sortBy === "expiryDate" && (
+                              <ArrowUpDown className={`h-3 w-3 transition-transform ${sortOrder === "desc" ? "rotate-180" : ""}`} />
+                            )}
+                          </button>
                         </th>
-                        <th className="px-4 py-3 text-right">Actions</th>
+                        <th className="py-3 px-4 text-left">Status</th>
+                        <th className="py-3 px-4 text-left">Last Updated</th>
+                        <th className="py-3 px-4 text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredProducts.map((product) => (
-                        <motion.tr
-                          key={product.id}
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          className="border-b hover:bg-gray-50"
-                        >
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 rounded-md border bg-gray-100 relative overflow-hidden">
-                                <Image 
-                                  src={product.image || "/placeholder.svg"} 
-                                  alt={product.name}
-                                  fill
-                                  className="object-cover"
-                                  unoptimized
-                                />
-                              </div>
-                              <div>
-                                <p className="font-medium text-gray-900">{product.name}</p>
-                                <p className="text-xs text-gray-500">SKU: {product.sku}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 hidden md:table-cell">
-                            <Badge variant="outline" className="bg-gray-50">
-                              {product.category}
-                            </Badge>
-                          </td>
-                          <td className="px-4 py-3">₱{product.price != null ? product.price.toFixed(2) : '0.00'}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <span className={`inline-block h-2 w-2 rounded-full ${getStockStatus(product.stock).indicator}`} />
-                              <div className="flex flex-col">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={getStockStatus(product.stock).color}>{product.stock}</span>
-                                  {getStockStatus(product.stock).badge && (
-                                    <Badge variant="outline" className={`${getStockStatus(product.stock).bgColor} ${getStockStatus(product.stock).color} border-0 text-xs py-0 px-1.5`}>
-                                      {getStockStatus(product.stock).badge}
-                                    </Badge>
-                                  )}
+                      {filteredProducts.length > 0 ? (
+                        filteredProducts.map((product) => (
+                          <motion.tr
+                            key={product.id}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className={`border-b hover:bg-gray-50 cursor-pointer transition-colors
+                              ${!product.isActive ? 'bg-gray-100 text-gray-500' : 
+                                isExpired(product.expiryDate) ? 'bg-red-50 hover:bg-red-100' : 
+                                isExpiringSoon(product.expiryDate) ? 'bg-amber-50 hover:bg-amber-100' : ''
+                              }`}
+                            onClick={() => handleProductClick(product)}
+                          >
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className="relative h-10 w-10 rounded-md overflow-hidden bg-gray-100">
+                                  <Image
+                                    src={product.image || "/placeholder.svg"}
+                                    alt={product.name}
+                                    fill
+                                    className="object-cover"
+                                    unoptimized
+                                    sizes="40px"
+                                  />
                                 </div>
+                                <span className="font-medium capitalize">{product.name}</span>
                               </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 hidden md:table-cell">
-                            <Badge
-                              variant="outline"
-                              className={getProductStatus(product).color}
-                            >{getProductStatus(product).label}</Badge>
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => handleEditProduct(product)}>
-                                  <Edit className="h-4 w-4 mr-2" /> Edit Product
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleUpdateStock(product)}>
-                                  Update Stock
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => handleDeleteProduct(product)} className="text-red-600">
-                                  <Archive className="h-4 w-4 mr-2" /> {product.isActive === false ? "Delete Permanently" : "Archive Product"}
-                                </DropdownMenuItem>
-                                {product.isActive === false && (
-                                  <DropdownMenuItem onClick={() => handleActivateProduct(product)} className="text-green-600">
-                                    Restore Product
-                                  </DropdownMenuItem>
+                            </td>
+                            <td className="py-3 px-4 text-gray-600 font-mono text-sm">{product.sku}</td>
+                            <td className="py-3 px-4">
+                              <Badge className="capitalize">{product.category}</Badge>
+                            </td>
+                            <td className="py-3 px-4 font-medium">₱{product.price.toFixed(2)}</td>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`font-medium ${getStockStatus(product.stock).color}`}>
+                                  {product.stock}
+                                </span>
+                                {getStockStatus(product.stock).badge && (
+                                  <Badge className={`${getStockStatus(product.stock).bgColor} ${getStockStatus(product.stock).color} border-0 text-xs`}>
+                                    {getStockStatus(product.stock).badge}
+                                  </Badge>
                                 )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                              </div>
+                            </td>
+                            <td className={`py-3 px-4 text-sm ${isExpired(product.expiryDate) ? 'text-red-500' : isExpiringSoon(product.expiryDate) ? 'text-amber-500' : ''}`}>
+                              {formatDate(product.expiryDate) || 'N/A'}
+                            </td>
+                            <td className="py-3 px-4">
+                              {product.isActive ? (
+                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                  Active
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
+                                  Archived
+                                </Badge>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-gray-600">{product.lastRestocked}</td>
+                            <td className="py-3 px-4">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onSelect={(e) => {
+                                    e.stopPropagation();
+                                    handleProductClick(product);
+                                  }}>
+                                    <Edit className="h-4 w-4 mr-2" />
+                                    Edit Product
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={(e) => {
+                                    e.stopPropagation();
+                                    handleProductClick(product);
+                                  }}>
+                                    <Package className="h-4 w-4 mr-2" />
+                                    Update Stock
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  {product.isActive ? (
+                                    <DropdownMenuItem
+                                      className="text-red-600"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleArchiveProduct(product.id);
+                                      }}
+                                    >
+                                      <Archive className="h-4 w-4 mr-2" />
+                                      Archive Product
+                                    </DropdownMenuItem>
+                                  ) : (
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRestoreProduct(product.id);
+                                      }}
+                                    >
+                                      <Package className="h-4 w-4 mr-2" />
+                                      Restore Product
+                                    </DropdownMenuItem>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </td>
+                          </motion.tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={8} className="py-10 text-center">
+                            <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                            <h3 className="text-lg font-medium text-gray-900">No products found</h3>
+                            <p className="text-gray-500">Try adjusting your search or filters</p>
                           </td>
-                        </motion.tr>
-                      ))}
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1173,58 +1313,98 @@ export default function AdminInventoryPage() {
       </main>
 
       {/* Add Product Modal */}
-      <Dialog open={isAddProductModalOpen} onOpenChange={setIsAddProductModalOpen} >
-        <DialogContent className="max-h-screen sm:max-w-md ">
+      <Dialog open={isAddProductModalOpen} onOpenChange={setIsAddProductModalOpen}>
+        <DialogContent className="sm:max-w-md max-h-screen overflow-y-auto py-2">
           <DialogHeader>
-            <DialogTitle>Add New Product</DialogTitle>
+            <DialogTitle className="text-2xl font-bold sticky top-0">Add New Product</DialogTitle>
             <DialogDescription>Enter the details of the new product</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4">
+            {/* Image Upload */}
+            <div 
+              className={`relative aspect-video bg-gray-100 rounded-md overflow-hidden cursor-pointer flex flex-col items-center justify-center border-2 ${errors.image ? 'border-red-300' : 'border-transparent'}`}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {newProduct.image ? (
+                <Image
+                  src={newProduct.image}
+                  alt="Product preview"
+                  fill
+                  className="object-cover"
+                  unoptimized
+                  sizes="(max-width: 768px) 100vw, 500px"
+                />
+              ) : (
+                <>
+                  <ImageIcon className="h-10 w-10 text-gray-400 mb-2" />
+                  <p className="text-sm text-gray-500">Click to upload product image</p>
+                </>
+              )}
+              <input 
+                title="image"
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                accept="image/*"
+                onChange={(e) => handleImageChange(e, false)}
+              />
+            </div>
+            {errors.image && <p className="text-xs text-red-500 -mt-3">{errors.image}</p>}
+            
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <label className="text-sm font-medium">Product Name</label>
                 <Input 
                   placeholder="Enter product name" 
+                  name="name"
                   value={newProduct.name}
                   onChange={(e) => setNewProduct({...newProduct, name: e.target.value})}
+                  className={errors.name ? 'border-red-300' : ''}
                 />
-                {validationErrors.name && (
-                  <p className="text-xs text-red-600">{validationErrors.name}</p>
-                )}
+                {errors.name && <p className="text-xs text-red-500">{errors.name}</p>}
               </div>
 
               <div className="grid gap-2">
                 <label className="text-sm font-medium">Category</label>
-                <Select 
-                  value={newProduct.category}
-                  onValueChange={(value) => setNewProduct({...newProduct, category: value})}
-                >
-                  <SelectTrigger>
+                <Select value={newProduct.category} onValueChange={(value) => setNewProduct({...newProduct, category: value})}>
+                  <SelectTrigger className={errors.category ? 'border-red-300' : ''}>
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
-                    {categories
-                      .filter((c) => c !== "all")
-                      .map((category) => (
-                        <SelectItem key={category} value={category} className="capitalize">
-                          {category}
-                        </SelectItem>
-                      ))}
-                    <SelectItem value="new-category">+ Add New Category</SelectItem>
+                    {category.map((cat: Category) => (
+                      <SelectItem key={cat.id} value={cat.name} className="capitalize">
+                        {cat.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                {newProduct.category === "new-category" && (
-                  <Input 
-                    placeholder="Enter new category name" 
-                    className="mt-2"
-                    onChange={(e) => setNewProduct({...newProduct, category: e.target.value})}
-                  />
-                )}
-                {validationErrors.category && (
-                  <p className="text-xs text-red-600 mt-1">{validationErrors.category}</p>
-                )}
+                {errors.category && <p className="text-xs text-red-500">{errors.category}</p>}
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">SKU (Stock Keeping Unit)</label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Enter or generate SKU"
+                  name="sku"
+                  value={newProduct.sku}
+                  onChange={(e) => setNewProduct({...newProduct, sku: e.target.value})}
+                  className={errors.sku ? 'border-red-300' : ''}
+                />
+                <Button variant="outline" type="button" onClick={generateSKU}>
+                  Generate
+                </Button>
+                <Button variant="outline" className="flex items-center gap-2" onClick={() => toast({
+                    title: "Barcode Scanner",
+                    description: "Camera barcode scanning functionality would be triggered here.",
+                  })}>
+             <Barcode className="h-4 w-4" />
+                    Scan
+                  </Button>
+              </div>
+              {errors.sku && <p className="text-xs text-red-500">{errors.sku}</p>}
             </div>
 
             <div className="grid gap-2">
@@ -1232,77 +1412,31 @@ export default function AdminInventoryPage() {
               <Input 
                 type="number" 
                 placeholder="0.00" 
+                name="basePrice"
                 value={newProduct.basePrice}
                 onChange={handleBasePriceChange}
+                className={errors.basePrice ? 'border-red-300' : ''}
                 step="0.01"
                 min="0"
               />
-              {validationErrors.basePrice && (
-                <p className="text-xs text-red-600">{validationErrors.basePrice}</p>
-              )}
               <p className="text-xs text-gray-500">The price at which the product was purchased from the supplier.</p>
+              {errors.basePrice && <p className="text-xs text-red-500">{errors.basePrice}</p>}
             </div>
 
             <div className="grid gap-2">
               <label className="text-sm font-medium">Profit Margin</label>
-              <div className="flex gap-2">
-                <Select 
-                  value={newProduct.profitType} 
-                  onValueChange={(value) => handleProfitChange(value, newProduct.profitValue)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select profit type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="percentage">Percentage (%)</SelectItem>
-                    <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input 
-                  type="number" 
-                  placeholder={newProduct.profitType === "percentage" ? "0%" : "₱0.00"} 
-                  value={newProduct.profitValue}
-                  onChange={(e) => handleProfitChange(newProduct.profitType, e.target.value)}
-                  step="0.01"
-                  min="0"
-                />
-              </div>
-              <p className="text-xs text-gray-500">
-                {newProduct.profitType === "percentage" 
-                  ? "Percentage markup on the base price." 
-                  : "Fixed amount added to the base price."}
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Discount</label>
-              <div className="flex gap-2">
-                <Select 
-                  value={newProduct.discountType} 
-                  onValueChange={(value) => handleDiscountChange(value, newProduct.discountValue)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select discount type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="percentage">Percentage (%)</SelectItem>
-                    <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input 
-                  type="number" 
-                  placeholder={newProduct.discountType === "percentage" ? "0%" : "₱0.00"} 
-                  value={newProduct.discountValue}
-                  onChange={(e) => handleDiscountChange(newProduct.discountType, e.target.value)}
-                  step="0.01"
-                  min="0"
-                />
-              </div>
-              <p className="text-xs text-gray-500">
-                {newProduct.discountType === "percentage" 
-                  ? "Percentage discount applied to the calculated price." 
-                  : "Fixed amount discount applied to the calculated price."}
-              </p>
+              <Input 
+                type="number" 
+                placeholder="₱0.00" 
+                name="profitValue"
+                value={newProduct.profitValue}
+                onChange={(e) => handleProfitChange(e.target.value)}
+                className={errors.profitValue ? 'border-red-300' : ''}
+                step="0.01"
+                min="0"
+              />
+              <p className="text-xs text-gray-500">Fixed amount added to the base price.</p>
+              {errors.profitValue && <p className="text-xs text-red-500">{errors.profitValue}</p>}
             </div>
 
             <div className="grid gap-2">
@@ -1310,11 +1444,29 @@ export default function AdminInventoryPage() {
               <Input 
                 type="number" 
                 placeholder="0.00" 
+                name="price"
                 value={newProduct.price}
                 onChange={(e) => setNewProduct({...newProduct, price: e.target.value})}
+                className={errors.price ? 'border-red-300' : ''}
+                step="0.01"
+                min="0"
                 readOnly
               />
               <p className="text-xs text-gray-500">Final selling price calculated from base price and profit margin.</p>
+              {errors.price && <p className="text-xs text-red-500">{errors.price}</p>}
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Expiry Date (Optional)</label>
+              <Input 
+                type="date" 
+                name="expiryDate"
+                value={newProduct.expiryDate}
+                onChange={(e) => setNewProduct({...newProduct, expiryDate: e.target.value})}
+                className={errors.expiryDate ? 'border-red-300' : ''}
+              />
+              {errors.expiryDate && <p className="text-xs text-red-500">{errors.expiryDate}</p>}
+              <p className="text-xs text-gray-500">The date when this product will expire. Leave empty if not applicable.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1323,52 +1475,24 @@ export default function AdminInventoryPage() {
                 <Input 
                   type="number" 
                   placeholder="0" 
+                  name="stock"
                   value={newProduct.stock}
                   onChange={(e) => setNewProduct({...newProduct, stock: e.target.value})}
+                  className={errors.stock ? 'border-red-300' : ''}
+                  min="0"
                 />
-                {validationErrors.stock && (
-                  <p className="text-xs text-red-600">{validationErrors.stock}</p>
-                )}
+                {errors.stock && <p className="text-xs text-red-500">{errors.stock}</p>}
               </div>
 
               <div className="grid gap-2">
-                <label className="text-sm font-medium">SKU/Barcode</label>
-                <div className="flex gap-2">
-                  <Input 
-                    placeholder="Enter SKU or barcode number" 
-                    className="flex-1" 
-                    value={newProduct.sku}
-                    onChange={(e) => setNewProduct({...newProduct, sku: e.target.value})}
-                  />
-                  <Button variant="outline" className="flex items-center gap-2">
-                    <Barcode className="h-4 w-4" />
-                    Scan
-                  </Button>
-                </div>
-                {validationErrors.sku && (
-                  <p className="text-xs text-red-600">{validationErrors.sku}</p>
-                )}
+                <label className="text-sm font-medium">Supplier</label>
+                <Input 
+                  placeholder="Enter supplier name" 
+                  name="supplier"
+                  value={newProduct.supplier}
+                  onChange={(e) => setNewProduct({...newProduct, supplier: e.target.value})}
+                />
               </div>
-            </div>
-
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Supplier</label>
-              <Input 
-                placeholder="Enter supplier name" 
-                value={newProduct.supplier}
-                onChange={(e) => setNewProduct({...newProduct, supplier: e.target.value})}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Expiry Date</label>
-              <Input 
-                type="date" 
-                placeholder="Select expiry date (if applicable)" 
-                value={newProduct.expiryDate}
-                onChange={(e) => setNewProduct({...newProduct, expiryDate: e.target.value})}
-              />
-              <p className="text-xs text-gray-500">Leave blank if product doesn't expire</p>
             </div>
 
             <div className="grid gap-2">
@@ -1376,13 +1500,14 @@ export default function AdminInventoryPage() {
               <textarea
                 className="min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 placeholder="Enter product description"
+                name="description"
                 value={newProduct.description}
                 onChange={(e) => setNewProduct({...newProduct, description: e.target.value})}
               />
             </div>
           </div>
 
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 mt-4">
             <Button variant="outline" className="sm:flex-1" onClick={() => setIsAddProductModalOpen(false)}>
               Cancel
             </Button>
@@ -1396,247 +1521,196 @@ export default function AdminInventoryPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Product Modal */}
-      <Dialog open={isEditProductModalOpen} onOpenChange={setIsEditProductModalOpen}>
-        <DialogContent className="max-h-screen sm:max-w-md overflow-y-auto">
+      {/* View/Edit Product Modal (from POS) */}
+      <Dialog open={isProductDetailModalOpen} onOpenChange={setIsProductDetailModalOpen}>
+        <DialogContent className="sm:max-w-md max-h-screen overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Product</DialogTitle>
-            <DialogDescription>Update product information</DialogDescription>
+            <DialogTitle>{isEditMode ? "Edit Product" : "Product Details"}</DialogTitle>
+            <DialogDescription>
+              {isEditMode ? "Update product information." : "View product details and update stock."}
+            </DialogDescription>
           </DialogHeader>
 
           {selectedProduct && (
-            <div className="grid gap-4">
-              <div 
-                className="relative aspect-video bg-gray-100 rounded-md overflow-hidden cursor-pointer flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-amber-500 transition-colors"
-                onClick={() => editFileInputRef.current?.click()}
-              >
-                <Image
-                  src={editedProduct.image || "/placeholder.svg"}
-                  alt={editedProduct.name || "Product image"}
-                  fill
-                  className="object-cover"
-                  unoptimized
-                />
-                <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                  <p className="text-white font-medium">Change Image</p>
-                </div>
-                <input
-                  type="file"
-                  ref={editFileInputRef}
-                  className="hidden"
-                  accept="image/*"
-                  onChange={(e) => handleImageChange(e, true)}
-                />
-              </div>
+            <>
+             <Tabs value={isEditMode ? "edit" : "view"} onValueChange={(value) => setIsEditMode(value === 'edit')} className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="view" onClick={() => setIsEditMode(false)}>View Details</TabsTrigger>
+                  <TabsTrigger value="edit" onClick={() => handleEditProduct(selectedProduct)}>Edit Product</TabsTrigger>
+                </TabsList>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <label className="text-sm font-medium">Product Name</label>
-                  <Input 
-                    placeholder="Enter product name" 
-                    value={editedProduct.name} 
-                    onChange={(e) => setEditedProduct({...editedProduct, name: e.target.value})}
-                  />
-                </div>
+                <TabsContent value="view" className="mt-4">
+                  <div className="grid gap-4">
+                    <div className="relative aspect-video bg-gray-100 rounded-md overflow-hidden">
+                     <Image
+                        src={selectedProduct.image || "/placeholder.svg"}
+                        alt={selectedProduct.name}
+                        fill
+                        className="object-cover"
+                        unoptimized 
+                      />
+                    </div>
 
-                <div className="grid gap-2">
-                  <label className="text-sm font-medium">Category</label>
-                  <Select 
-                    value={editedProduct.category}
-                    onValueChange={(value) => setEditedProduct({...editedProduct, category: value})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories
-                        .filter((c) => c !== "all")
-                        .map((category) => (
-                          <SelectItem key={category} value={category} className="capitalize">
-                            {category}
-                          </SelectItem>
-                        ))}
-                      <SelectItem value="new-category">+ Add New Category</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {editedProduct.category === "new-category" && (
-                    <Input 
-                      placeholder="Enter new category name" 
-                      className="mt-2"
-                      onChange={(e) => setEditedProduct({...editedProduct, category: e.target.value})}
-                    />
-                  )}
-                </div>
-              </div>
+                    <div className="grid gap-2">
+                      <div className="flex justify-between items-start">
+                        <h3 className="text-xl font-bold text-gray-900 capitalize">{selectedProduct.name}</h3>
+                        <Badge className="capitalize">{selectedProduct.category}</Badge>
+                      </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Base Price (₱)</label>
-                <Input 
-                  type="number" 
-                  placeholder="0.00" 
-                  value={editedProduct.basePrice} 
-                  onChange={handleEditBasePriceChange}
-                  step="0.01"
-                  min="0"
-                />
-                <p className="text-xs text-gray-500">The price at which the product was purchased from the supplier.</p>
-              </div>
+                      <p className="text-sm text-gray-600 font-mono">SKU: {selectedProduct.sku}</p>
+                      <p className="text-gray-600">{selectedProduct.description}</p>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Profit Margin</label>
-                <div className="flex gap-2">
-                  <Select 
-                    value={editedProduct.profitType} 
-                    onValueChange={(value) => handleEditProfitChange(value, editedProduct.profitValue)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select profit type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="percentage">Percentage (%)</SelectItem>
-                      <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input 
-                    type="number" 
-                    placeholder={editedProduct.profitType === "percentage" ? "0%" : "₱0.00"} 
-                    value={editedProduct.profitValue}
-                    onChange={(e) => handleEditProfitChange(editedProduct.profitType, e.target.value)}
-                    step="0.01"
-                    min="0"
-                  />
-                </div>
-                <p className="text-xs text-gray-500">
-                  {editedProduct.profitType === "percentage" 
-                    ? "Percentage markup on the base price." 
-                    : "Fixed amount added to the base price."}
-                </p>
-              </div>
+                      <div className="grid grid-cols-2 gap-4 mt-2">
+                        <div>
+                          <p className="text-sm text-gray-500">Base Price</p>
+                          <p className="font-medium">₱{selectedProduct.basePrice?.toFixed(2)}</p>
+                        </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Selling Price (₱)</label>
-                <Input 
-                  type="number" 
-                  placeholder="0.00" 
-                  value={editedProduct.price} 
-                  onChange={(e) => setEditedProduct({...editedProduct, price: e.target.value})}
-                  step="0.01"
-                  min="0"
-                  readOnly
-                />
-                <p className="text-xs text-gray-500">Final selling price calculated from base price and profit margin.</p>
-              </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Profit Margin</p>
+                          <p className="font-medium">₱{selectedProduct.profitValue?.toFixed(2)}</p>
+                        </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Discount</label>
-                <div className="flex gap-2">
-                  <Select 
-                    value={editedProduct.discountType} 
-                    onValueChange={(value) => handleEditDiscountChange(value, editedProduct.discountValue)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select discount type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="percentage">Percentage (%)</SelectItem>
-                      <SelectItem value="fixed">Fixed Amount (₱)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input 
-                    type="number" 
-                    placeholder={editedProduct.discountType === "percentage" ? "0%" : "₱0.00"} 
-                    value={editedProduct.discountValue}
-                    onChange={(e) => handleEditDiscountChange(editedProduct.discountType, e.target.value)}
-                    step="0.01"
-                    min="0"
-                  />
-                </div>
-                <p className="text-xs text-gray-500">
-                  {editedProduct.discountType === "percentage" 
-                    ? "Percentage discount applied to the calculated price." 
-                    : "Fixed amount discount applied to the calculated price."}
-                </p>
-              </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Selling Price</p>
+                          <p className="font-bold text-amber-600">₱{selectedProduct.price?.toFixed(2)}</p>
+                        </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">SKU/Barcode</label>
-                <Input 
-                  placeholder="Enter barcode number" 
-                  value={editedProduct.sku} 
-                  onChange={(e) => setEditedProduct({...editedProduct, sku: e.target.value})}
-                  disabled
-                />
-              </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Stock</p>
+                          <div className="flex items-center gap-2">
+                            <p className={`font-bold ${getStockStatus(selectedProduct.stock).color}`}>
+                              {selectedProduct.stock} units
+                            </p>
+                            {getStockStatus(selectedProduct.stock).badge && (
+                              <Badge className={`${getStockStatus(selectedProduct.stock).bgColor} ${getStockStatus(selectedProduct.stock).color} border-0`}>
+                                {getStockStatus(selectedProduct.stock).badge}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Stock</label>
-                <Input 
-                  type="number" 
-                  placeholder="0" 
-                  value={editedProduct.stock} 
-                  onChange={(e) => setEditedProduct({...editedProduct, stock: e.target.value})}
-                  min="0"
-                />
-              </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Last Restocked</p>
+                          <p className="font-medium">{selectedProduct.lastRestocked || 'N/A'}</p>
+                        </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Product Status</label>
-                <Select 
-                  value={editedProduct.isActive ? "active" : "archived"} 
-                  onValueChange={(value) => setEditedProduct({...editedProduct, isActive: value === "active"})}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="archived">Archived</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Supplier</p>
+                          <p className="font-medium">{selectedProduct.supplier}</p>
+                        </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Supplier</label>
-                <Input 
-                  placeholder="Enter supplier name" 
-                  value={editedProduct.supplier} 
-                  onChange={(e) => setEditedProduct({...editedProduct, supplier: e.target.value})}
-                />
-              </div>
+                        <div>
+                          <p className="text-sm text-gray-500">Status</p>
+                          <p className={`font-medium ${selectedProduct.isActive ? 'text-green-600' : 'text-red-600'}`}>
+                            {selectedProduct.isActive ? 'Active' : 'Archived'}
+                          </p>
+                        </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Expiry Date</label>
-                <Input 
-                  type="date" 
-                  placeholder="Select expiry date (if applicable)" 
-                  value={editedProduct.expiryDate ? editedProduct.expiryDate.substring(0, 10) : ""}
-                  onChange={(e) => setEditedProduct({...editedProduct, expiryDate: e.target.value})}
-                />
-                <p className="text-xs text-gray-500">Leave blank if product doesn't expire</p>
-              </div>
+                        <div>
+                          <div className="text-sm text-gray-500">Expiry Date</div>
+                          <div className={`font-medium ${isExpired(selectedProduct.expiryDate) ? 'text-red-600' : isExpiringSoon(selectedProduct.expiryDate) ? 'text-amber-600' : ''}`}>
+                            {formatDate(selectedProduct.expiryDate) || 'N/A'}
+                            {isExpired(selectedProduct.expiryDate) && (
+                              <Badge variant="outline" className="ml-2 bg-red-50 text-red-700 border-red-200">
+                                Expired
+                              </Badge>
+                            )}
+                            {isExpiringSoon(selectedProduct.expiryDate) && !isExpired(selectedProduct.expiryDate) && (
+                              <Badge variant="outline" className="ml-2 bg-amber-50 text-amber-700 border-amber-200">
+                                Expires Soon
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
 
-              <div className="grid gap-2">
-                <label className="text-sm font-medium">Description</label>
-                <textarea
-                  className="min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder="Enter product description"
-                  value={editedProduct.description}
-                  onChange={(e) => setEditedProduct({...editedProduct, description: e.target.value})}
-                />
-              </div>
-            </div>
+                      <div className="mt-4 pt-4 border-t border-gray-200">
+                        <h4 className="font-medium text-gray-900 mb-2">Update Stock</h4>
+                        <div className="grid gap-2">
+                          <label className="text-sm font-medium">New Stock Quantity</label>
+                          <Input 
+                            type="number"
+                            value={updatedStock}
+                            onChange={(e) => setUpdatedStock(e.target.value)}
+                            className={stockUpdateError ? 'border-red-300' : ''}
+                            min="0"
+                          />
+                          {stockUpdateError && <p className="text-xs text-red-500">{stockUpdateError}</p>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="edit" className="mt-4">
+                  <div className="grid gap-4 py-4">
+                    {/* This is where the edit form from Edit Product Modal goes */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <label className="text-sm font-medium">Product Name</label>
+                        <Input placeholder="Enter product name" value={editedProduct.name} onChange={(e) => setEditedProduct({...editedProduct, name: e.target.value})} />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-sm font-medium">Category</label>
+                        <Select value={editedProduct.category} onValueChange={(value) => setEditedProduct({...editedProduct, category: value})}>
+                          <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                          <SelectContent>
+                            {category.map((cat) => (
+                              <SelectItem key={cat.id} value={cat.name} className="capitalize">{cat.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Base Price (₱)</label>
+                      <Input type="number" placeholder="0.00" value={editedProduct.basePrice} onChange={handleEditBasePriceChange} step="0.01" min="0" />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Profit Margin</label>
+                      <Input type="number" placeholder="₱0.00" value={editedProduct.profitValue} onChange={(e) => handleEditProfitChange(e.target.value)} step="0.01" min="0" />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Selling Price (₱)</label>
+                      <Input type="number" placeholder="0.00" value={editedProduct.price} onChange={(e) => setEditedProduct({...editedProduct, price: e.target.value})} step="0.01" min="0" readOnly />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">SKU/Barcode</label>
+                      <Input placeholder="Enter barcode number" value={editedProduct.sku} onChange={(e) => setEditedProduct({...editedProduct, sku: e.target.value})} disabled />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Stock</label>
+                      <Input type="number" placeholder="0" value={editedProduct.stock} onChange={(e) => setEditedProduct({...editedProduct, stock: e.target.value})} min="0" />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Expiry Date</label>
+                      <Input type="date" value={editedProduct.expiryDate ? editedProduct.expiryDate.substring(0, 10) : ""} onChange={(e) => setEditedProduct({...editedProduct, expiryDate: e.target.value})} />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Description</label>
+                      <textarea className="min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="Enter product description" value={editedProduct.description} onChange={(e) => setEditedProduct({...editedProduct, description: e.target.value})} />
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </>
           )}
-
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button variant="outline" className="sm:flex-1" onClick={() => setIsEditProductModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              className="sm:flex-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
-              onClick={handleSaveEdit}
-            >
-              Save Changes
-            </Button>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsProductDetailModalOpen(false)} disabled={isLoading}>Cancel</Button>
+            {isEditMode ? (
+              <Button onClick={handleSaveEdit} disabled={isLoading}>
+                {isLoading ? "Saving..." : "Save Changes"}
+              </Button>
+            ) : (
+              <Button onClick={() => {
+                // Placeholder for stock update logic
+                toast({ title: "Stock Update", description: `Stock updated to ${updatedStock}` });
+                setIsProductDetailModalOpen(false);
+              }} disabled={isLoading}>
+                Update Stock
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1662,7 +1736,7 @@ export default function AdminInventoryPage() {
                 />
               </div>
               <div>
-                <h4 className="font-medium">{selectedProduct.name}</h4>
+                <h4 className="font-medium capitalize">{selectedProduct.name}</h4>
                 <p className="text-sm text-gray-600">
                   {selectedProduct.category} - ₱{selectedProduct.price != null ? selectedProduct.price.toFixed(2) : '0.00'}
                 </p>
@@ -1671,7 +1745,7 @@ export default function AdminInventoryPage() {
           )}
 
           <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button variant="outline" className="sm:flex-1" onClick={() => setIsDeleteConfirmOpen(false)}>
+        <Button variant="outline" className="sm:flex-1" onClick={() => setIsProductDetailModalOpen(false)}>
               Cancel
             </Button>
             <Button
@@ -1684,138 +1758,6 @@ export default function AdminInventoryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* View Product Modal */}
-      <Dialog open={!!selectedProduct && !isEditProductModalOpen && !isDeleteConfirmOpen} onOpenChange={() => setSelectedProduct(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Product Details</DialogTitle>
-          </DialogHeader>
-          
-          {selectedProduct && (
-            <div className="grid gap-4">
-              <div className="relative h-40 w-full rounded-md overflow-hidden bg-gray-100">
-                <Image 
-                  src={selectedProduct.image || "/placeholder.svg"} 
-                  alt={selectedProduct.name}
-                  fill
-                  className="object-cover"
-                  unoptimized
-                />
-              </div>
-              
-              <div>
-                <h3 className="text-xl font-semibold">{selectedProduct.name}</h3>
-                <p className="text-sm text-gray-500">SKU: {selectedProduct.sku}</p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Base Price</p>
-                  <p className="text-lg font-medium">₱{selectedProduct.basePrice != null ? selectedProduct.basePrice.toFixed(2) : '0.00'}</p>
-                </div>
-                
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Profit Margin</p>
-                  <p className="text-lg font-medium">
-                    {selectedProduct.profitType === "percentage" 
-                      ? `${selectedProduct.profitValue}%` 
-                      : `₱${selectedProduct.profitValue != null ? selectedProduct.profitValue.toFixed(2) : '0.00'}`}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Selling Price</p>
-                  <p className="text-lg font-semibold">₱{selectedProduct.price != null ? selectedProduct.price.toFixed(2) : '0.00'}</p>
-                </div>
-                
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Stock</p>
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-block h-2 w-2 rounded-full ${getStockStatus(selectedProduct.stock).indicator}`} />
-                    <span className={`text-lg font-semibold ${getStockStatus(selectedProduct.stock).color}`}>
-                      {selectedProduct.stock}
-                    </span>
-                    {getStockStatus(selectedProduct.stock).badge && (
-                      <Badge variant="outline" className={`${getStockStatus(selectedProduct.stock).bgColor} ${getStockStatus(selectedProduct.stock).color} border-0`}>
-                        {getStockStatus(selectedProduct.stock).badge}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Category</p>
-                  <p>{selectedProduct.category}</p>
-                </div>
-                
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Discount</p>
-                  <p className="text-lg font-medium">
-                    {selectedProduct.discountValue && selectedProduct.discountValue > 0
-                      ? `${selectedProduct.discountValue}${selectedProduct.discountType === "percentage" ? "%" : "₱"}`
-                      : "No Discount"}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Supplier</p>
-                  <p>{selectedProduct.supplier || "Not specified"}</p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Last Restocked</p>
-                  <p>{formatDate(selectedProduct.lastRestocked) || "Not available"}</p>
-                </div>
-                
-                <div>
-                  <p className="text-sm font-medium text-gray-500">Expiry Date</p>
-                  <p>{selectedProduct.expiryDate ? formatDate(selectedProduct.expiryDate) : "No expiry date"}</p>
-                  {selectedProduct.expiryDate && isExpired(selectedProduct.expiryDate) && (
-                    <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 mt-1">
-                      Expired
-                    </Badge>
-                  )}
-                  {selectedProduct.expiryDate && isExpiringSoon(selectedProduct.expiryDate) && !isExpired(selectedProduct.expiryDate) && (
-                    <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-200 mt-1">
-                      Expires Soon
-                    </Badge>
-                  )}
-                </div>
-              </div>
-              
-              <div>
-                <p className="text-sm font-medium text-gray-500">Status</p>
-                {selectedProduct.isActive === false ? (
-                  <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200">
-                    Archived
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200">
-                    Active
-                  </Badge>
-                )}
-              </div>
-              
-              <div>
-                <p className="text-sm font-medium text-gray-500">Description</p>
-                <p className="text-gray-600">{selectedProduct.description || "No description provided."}</p>
-              </div>
-              
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setSelectedProduct(null)}>Close</Button>
-                <Button onClick={() => selectedProduct && handleEditProduct(selectedProduct)}>Edit Product</Button>
-              </DialogFooter>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
-  )
+  );
 }

@@ -94,7 +94,7 @@ export function Navbar({ userType = "cashier", userName = "John Doe", memberData
   // Function to check if a link is active
   const isLinkActive = (href: string) => {
     // Special case for cashier - POS is the same as home
-    if (userType === "cashier" && (href === "/pos" || pathname === "/pos")) {
+    if (userType === "cashier" && (href === "/pos" || pathname === "/pos/inventory")) {
       return href === "/pos"
     }
 

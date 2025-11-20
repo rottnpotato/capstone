@@ -82,6 +82,8 @@ export class ProductRepository {
     ExpiryDate?: Date;
     Image?: string;
     Supplier?: string;
+    DiscountType?: string;
+    DiscountValue?: string;
   }) {
     try {
       const results = await db.insert(Products)
@@ -109,6 +111,8 @@ export class ProductRepository {
     Image: string;
     Supplier: string;
     IsActive: boolean;
+    DiscountType: string;
+    DiscountValue: string;
   }>) {
     try {
       const results = await db.update(Products)

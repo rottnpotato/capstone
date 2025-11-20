@@ -1,0 +1,24 @@
+@media print {
+  /* Hide elements that should only be on screen */
+  .screen-only {
+    display: none !important;
+  }
+
+  /* Hide everything else by default */
+  body > *:not(#receipt-container) {
+    visibility: hidden;
+  }
+
+  /* Make the receipt container and everything inside it visible */
+  #receipt-container, #receipt-container * {
+    visibility: visible;
+  }
+
+  /* Position the receipt at the top-left of the page */
+  #receipt-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

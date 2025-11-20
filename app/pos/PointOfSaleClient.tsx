@@ -4,11 +4,11 @@ import { useState, useEffect, useMemo, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion" 
 import { Search, X, Plus, Minus, Trash2, User, CreditCard, DollarSign, Printer, Mail, ShoppingCart, ChevronDown, ChevronUp, CheckCircle } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
-import { Product, Member, getProducts, getCategories, searchProducts, getMembers, searchMembers, createTransaction, sendReceiptEmail } from "./actions"
+import { Product, Member, getProducts, getCategories, searchProducts, getMembers, searchMembers, createTransaction, sendReceiptEmail, getProductsByCategory } from "./actions"
 import { Navbar } from "@/components/ui/navbar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog"
 import { Command, CommandInput, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -18,12 +18,25 @@ import { Label } from "@/components/ui/label"
 import Image from "next/image"
 import { Badge } from "@/components/ui/badge"
 import { getCurrentUserData, UserProfileData } from "@/app/actions/userActions"
+import { Receipt } from "./Receipt"
+import "./print.css"
 
 type CartItem = Product & { quantity: number }
 
+export interface CompletedTransaction {
+  transactionId: string;
+  member?: Member;
+  items: CartItem[];
+  subtotal: number;
+  discount: number;
+  manualDiscount: number;
+  total: number;
+  cashierName: string;
+}
+
 export default function PointOfSaleClient() {
   const [products, setProducts] = useState<Product[]>([])
-  const [categories, setCategories] = useState<string[]>([])
+  const [categories, setCategories] = useState<{ Id: string; Name: string }[]>([])
   const [activeCategory, setActiveCategory] = useState("all")
   const [cart, setCart] = useState<CartItem[]>([])
   const [searchQuery, setSearchQuery] = useState("")
@@ -40,7 +53,7 @@ export default function PointOfSaleClient() {
   const [isPaymentModalOpen, setPaymentModalOpen] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "credit">("cash")
   const [isProcessing, setIsProcessing] = useState(false)
-  const [transactionComplete, setTransactionComplete] = useState<{ transactionId: string; member?: Member } | null>(null)
+  const [transactionComplete, setTransactionComplete] = useState<CompletedTransaction | null>(null)
 
   // Manual Discount State
   const [isDiscountModalOpen, setDiscountModalOpen] = useState(false)
@@ -59,7 +72,7 @@ export default function PointOfSaleClient() {
         getCurrentUserData(),
       ])
       setProducts(productsData)
-      setCategories(["all", ...categoriesData])
+      setCategories([{ Id: "all", Name: "all" }, ...categoriesData])
       setMembers(membersData)
       setCurrentUser(userData)
     } catch (error) {
@@ -77,6 +90,21 @@ export default function PointOfSaleClient() {
   useEffect(() => {
     fetchInitialData()
   }, [fetchInitialData])
+
+  useEffect(() => {
+    const fetchProductsByCategory = async () => {
+      if (activeCategory === "all") {
+        // When "all" is selected, fetch all products
+        const productsData = await getProducts();
+        setProducts(productsData);
+      } else if (activeCategory) {
+        // Avoid fetching for "all" as it's handled by getProducts()
+        const productsData = await getProductsByCategory(activeCategory);
+        setProducts(productsData);
+      }
+    };
+    fetchProductsByCategory();
+  }, [activeCategory]);
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query)
@@ -162,13 +190,21 @@ export default function PointOfSaleClient() {
   }
 
   const handleProcessPayment = async () => {
+     console.log("handleProcessPayment called.");
     if (!currentUser) {
+      console.error("Current user is not set. Aborting payment.");
       toast({ title: "Error", description: "User not identified.", variant: "destructive" })
       return
     }
 
+    setIsProcessing(true);
     if (paymentMethod === "credit" && !selectedMember) {
-      toast({ title: "Credit Payment Error", description: "A member must be selected for credit payments.", variant: "destructive" })
+      toast({ 
+        title: "Credit Payment Error",
+        description: "A member must be selected for credit payments.",
+        variant: "destructive",
+      });
+      setIsProcessing(false);
       return
     }
 
@@ -177,11 +213,12 @@ export default function PointOfSaleClient() {
         title: "Credit Limit Exceeded",
         description: `This purchase exceeds the member's available credit.`,
         variant: "destructive",
-      })
+      });
+      setIsProcessing(false);
       return
     }
+    console.log("Pre-conditions passed. Attempting to set isProcessing to true.");
 
-    setIsProcessing(true)
     try {
       const transactionData = {
         items: cart.map(item => ({ ProductId: parseInt(item.Id), Quantity: item.quantity, Price: item.Price, basePrice: item.basePrice })),
@@ -192,6 +229,7 @@ export default function PointOfSaleClient() {
         manualDiscount: manualDiscount,
       }
 
+      console.log("Transaction data prepared:", transactionData);
       const result = await createTransaction(
         transactionData.items,
         transactionData.totalAmount,
@@ -201,14 +239,25 @@ export default function PointOfSaleClient() {
         transactionData.manualDiscount
       )
 
+      console.log("Result from createTransaction:", result);
       if (result.success && result.transactionId) {
         toast({
           title: "Transaction Successful",
           description: `Transaction ID: ${result.transactionId}`,
         })
-        setTransactionComplete({ transactionId: result.transactionId, member: selectedMember || undefined })
+        setTransactionComplete({
+          transactionId: result.transactionId,
+          member: selectedMember || undefined,
+          items: cart,
+          subtotal: subtotal,
+          discount: discount,
+          manualDiscount: manualDiscount,
+          total: total,
+          cashierName: currentUser.name,
+        })
         setPaymentModalOpen(false)
       } else {
+        console.log("Transaction failed, but no explicit error message from result.");
         throw new Error(result.error || "An unknown error occurred.")
       }
     } catch (error: any) {
@@ -218,6 +267,8 @@ export default function PointOfSaleClient() {
         description: error.message || "Could not process the transaction.",
         variant: "destructive",
       })
+      console.log("Caught error during transaction:", error);
+      setPaymentModalOpen(false); // Close modal on failure to avoid getting stuck
     } finally {
       setIsProcessing(false)
     }
@@ -264,8 +315,12 @@ export default function PointOfSaleClient() {
     setManualDiscount(0)
     setDiscountInput("")
     setPaymentMethod("cash")
-    fetchInitialData() // Refetch data for next transaction
+    // fetchInitialData() // This is inefficient. We will update stock locally.
   }
+
+  const handlePrintReceipt = () => {
+    window.print();
+  };
 
   const applyManualDiscount = () => {
     const value = parseFloat(discountInput)
@@ -283,14 +338,7 @@ export default function PointOfSaleClient() {
   }
 
 
-  const filteredProducts = useMemo(() => {
-    if (activeCategory === "all") {
-      return products
-    }
-    return products.filter(
-      (p) => p.Category.toLowerCase() === activeCategory.toLowerCase()
-    )
-  }, [products, activeCategory])
+
 
   if (isLoading) {
     return (
@@ -304,8 +352,9 @@ export default function PointOfSaleClient() {
   }
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col">
-      <Navbar userType="cashier" userName={currentUser?.name || "Cashier"} />
+    <>
+      <div className="h-screen bg-gray-50 flex flex-col screen-only">
+        <Navbar userType="cashier" userName={currentUser?.name || "Cashier"} />
       <main className="flex-grow pt-16 flex">
         {/* Main content */}
         <div className="flex-grow flex flex-col">
@@ -324,12 +373,12 @@ export default function PointOfSaleClient() {
               <div className="flex items-center gap-2 overflow-x-auto pb-2">
                 {categories.map((category) => (
                   <Button
-                    key={category}
-                    variant={activeCategory === category ? "default" : "outline"}
-                    onClick={() => setActiveCategory(category)}
+                    key={category.Id}
+                    variant={activeCategory === category.Id ? "default" : "outline"}
+                    onClick={() => setActiveCategory(category.Id)}
                     className="capitalize shrink-0"
                   >
-                    {category}
+                    {category.Name}
                   </Button>
                 ))}
               </div>
@@ -340,7 +389,7 @@ export default function PointOfSaleClient() {
           <ScrollArea className="flex-grow">
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-4">
               <AnimatePresence>
-                {filteredProducts.map((product) => (
+                {products.map((product) => (
                   <motion.div
                     key={product.Id}
                     layout
@@ -367,7 +416,7 @@ export default function PointOfSaleClient() {
                       </div>
                       <CardContent className="p-4 flex-grow flex flex-col justify-between">
                         <div className="flex-grow">
-                          <h3 className="font-semibold text-sm leading-tight">{product.Name}</h3>
+                          <h3 className="font-semibold text-sm leading-tight capitalize">{product.Name}</h3>
                           <p className="text-xs text-gray-500">{product.Category}</p>
                         </div>
                         <div className="mt-2 text-right">
@@ -458,7 +507,7 @@ export default function PointOfSaleClient() {
                 {cart.map((item) => (
                   <div key={item.Id} className="p-4 flex items-center">
                     <div className="flex-grow">
-                      <p className="font-medium">{item.Name}</p>
+                      <p className="font-medium capitalize">{item.Name}</p>
                       <p className="text-sm text-gray-500">₱{item.Price.toFixed(2)}</p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -523,9 +572,12 @@ export default function PointOfSaleClient() {
 
       {/* Payment Modal */}
       <Dialog open={isPaymentModalOpen} onOpenChange={setPaymentModalOpen}>
-        <DialogContent>
+        <DialogContent onPointerDownOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Complete Payment</DialogTitle>
+            <DialogDescription>
+              Select a payment method and confirm the transaction.
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <div className="text-center mb-6">
@@ -538,7 +590,7 @@ export default function PointOfSaleClient() {
                 className="py-6 text-lg"
                 onClick={() => setPaymentMethod("cash")}
               >
-                <DollarSign className="mr-2" /> Cash
+                <span className="mr-2 font-bold text-xl">₱</span> Cash
               </Button>
               <Button
                 variant={paymentMethod === "credit" ? "default" : "outline"}
@@ -570,9 +622,12 @@ export default function PointOfSaleClient() {
 
       {/* Transaction Complete Modal */}
       <Dialog open={!!transactionComplete} onOpenChange={() => resetPOS()}>
-        <DialogContent>
+        <DialogContent onPointerDownOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Transaction Complete</DialogTitle>
+            <DialogDescription>
+              The transaction was successful. You can now start a new transaction or print a receipt.
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4 text-center">
             <motion.div
@@ -588,7 +643,7 @@ export default function PointOfSaleClient() {
           </div>
           <DialogFooter className="sm:justify-between">
             <div className="flex gap-2">
-              <Button variant="outline" disabled={isProcessing}>
+              <Button variant="outline" onClick={handlePrintReceipt}>
                 <Printer className="mr-2 h-4 w-4" /> Print Receipt
               </Button>
               {transactionComplete?.member && (
@@ -605,9 +660,12 @@ export default function PointOfSaleClient() {
       </Dialog>
       {/* Manual Discount Modal */}
       <Dialog open={isDiscountModalOpen} onOpenChange={setDiscountModalOpen}>
-        <DialogContent>
+        <DialogContent onPointerDownOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Apply Manual Discount</DialogTitle>
+            <DialogDescription>
+              Enter a fixed amount to discount from the total.
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
             <div className="grid gap-2">
@@ -629,6 +687,11 @@ export default function PointOfSaleClient() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+      {/* Receipt component for printing. It's not visible on screen due to print.css */}
+      <div id="receipt-container">
+        <Receipt data={transactionComplete} />
+      </div>
+    </>
   )
 }

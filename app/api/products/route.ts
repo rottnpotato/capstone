@@ -38,6 +38,7 @@ export async function GET(request: Request) {
       id: Products.ProductId,
       name: Products.Name,
       price: Products.Price,
+      basePrice: Products.BasePrice,
       category: Categories.Name,
       image: Products.Image,
       sku: Products.Sku,
@@ -46,6 +47,8 @@ export async function GET(request: Request) {
       supplier: Products.Supplier,
       lastRestocked: Products.UpdatedAt,
       expiryDate: Products.ExpiryDate,
+      discountType: Products.DiscountType,
+      discountValue: Products.DiscountValue,
     })
       .from(Products)
       .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
@@ -56,6 +59,7 @@ export async function GET(request: Request) {
       id: product.id,
       name: product.name,
       price: parseFloat(String(product.price)),
+      basePrice: parseFloat(String(product.basePrice)),
       category: product.category || '',
       image: product.image || '',
       sku: product.sku,
@@ -63,6 +67,8 @@ export async function GET(request: Request) {
       description: product.description || '',
       supplier: product.supplier || '',
       expiryDate: product.expiryDate || '',
+      discountType: product.discountType || undefined,
+      discountValue: parseFloat(String(product.discountValue || '0')),
       lastRestocked: product.lastRestocked instanceof Date
         ? product.lastRestocked.toISOString()
         : String(product.lastRestocked || ''),
@@ -136,11 +142,14 @@ export async function POST(request: Request) {
         Description: body.description || null,
         Sku: body.sku,
         Price: body.price,
+        BasePrice: body.basePrice,
         StockQuantity: body.stock || 0,
         CategoryId: categoryId,
         Image: body.image || null, // Store the image data
         Supplier: body.supplier || null, // Store the supplier
         ExpiryDate: expiryDate,
+        DiscountType: body.discountType || null,
+        DiscountValue: body.discountValue || 0,
         IsActive: true
       })
       .returning();
@@ -153,6 +162,7 @@ export async function POST(request: Request) {
         id: newProduct[0].ProductId,
         name: newProduct[0].Name,
         price: parseFloat(newProduct[0].Price),
+        basePrice: parseFloat(newProduct[0].BasePrice),
         category: body.category,
         sku: newProduct[0].Sku,
         stock: newProduct[0].StockQuantity,
@@ -160,6 +170,8 @@ export async function POST(request: Request) {
         supplier: newProduct[0].Supplier || '',
         image: newProduct[0].Image || '',
         expiryDate: newProduct[0].ExpiryDate ? new Date(newProduct[0].ExpiryDate).toISOString() : null,
+        discountType: newProduct[0].DiscountType,
+        discountValue: parseFloat(newProduct[0].DiscountValue || '0'),
         isActive: newProduct[0].IsActive
       }
     });

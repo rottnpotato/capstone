@@ -346,7 +346,7 @@ export default function AdminDashboard() {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
-              <p className="text-gray-600">Welcome back to Pandol Cooperative management system</p>
+              <p className="text-gray-600">Welcome Back To Pandol Cooperative Management System</p>
             </div>
 
             <div className="flex items-center gap-3">

@@ -25,6 +25,7 @@ interface InventoryReportData {
   totalInventoryValue: number
   lowStockItems: number
   expiredItems: number
+  nearExpiredItems: number
   inventoryByCategory: { category: string; count: number; value: number }[]
 }
 
@@ -33,6 +34,17 @@ const isExpired = (dateString: string | null | undefined) => {
   const date = new Date(dateString)
   return !isNaN(date.getTime()) && date < new Date()
 }
+
+const isExpiringSoon = (dateString: string | null | undefined) => {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return false;
+  const today = new Date();
+  const oneMonthFromNow = new Date();
+  oneMonthFromNow.setDate(today.getDate() + 30); // Set to 30 days from now
+
+  return date > today && date <= oneMonthFromNow;
+};
 
 export default function AdminReportsPage() {
   const [inventoryReport, setInventoryReport] = useState<InventoryReportData | null>(null)
@@ -72,6 +84,7 @@ export default function AdminReportsPage() {
           )
           const lowStockItems = products.filter((p) => p.stock < 10).length
           const expiredItems = products.filter((p) => isExpired(p.expiryDate)).length
+          const nearExpiredItems = products.filter((p) => isExpiringSoon(p.expiryDate)).length
 
           const inventoryByCategory = products.reduce((acc, p) => {
             let categoryData = acc.find((item) => item.category === p.category)
@@ -89,6 +102,7 @@ export default function AdminReportsPage() {
             totalInventoryValue,
             lowStockItems,
             expiredItems,
+            nearExpiredItems,
             inventoryByCategory,
           })
         } else {
@@ -179,7 +193,7 @@ export default function AdminReportsPage() {
           <div className="flex justify-between items-center mb-8 no-print">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">Reports</h1>
-              <p className="text-gray-600">An overview of your inventory and sales.</p>
+              <p className="text-gray-600">An Overview Of Your Inventory And Sales.</p>
             </div>
             <Button onClick={handlePrint}>
               <Printer className="h-4 w-4 mr-2" />
@@ -191,9 +205,9 @@ export default function AdminReportsPage() {
           {isLoading ? (
             <div className="text-center py-12">Loading report...</div>
           ) : error ? (
-            <div className="text-center py-12 text-red-600">{error}</div>
+            <div className="text-center py-12 text-red-600">{error}</div> //grid-cols-2 lg:grid-cols-4
           ) : inventoryReport && (
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-12">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5 mb-12">
               <Card className="print-card">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Total Products</CardTitle>
@@ -228,6 +242,15 @@ export default function AdminReportsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{inventoryReport.expiredItems}</div>
+                </CardContent>
+              </Card>
+              <Card className="print-card">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Near Expiry</CardTitle>
+                  <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{inventoryReport.nearExpiredItems}</div>
                 </CardContent>
               </Card>
             </div>
@@ -297,8 +320,8 @@ export default function AdminReportsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {salesReport.sales.map((sale) => (
-                          <tr key={sale.id} className="border-b hover:bg-gray-50">
+                        {salesReport.sales.map((sale, index) => (
+                          <tr key={`${sale.id}-${index}`} className="border-b hover:bg-gray-50">
                             <td className="px-4 py-3 font-medium">{sale.productName}</td>
                             <td className="px-4 py-3 text-right">{sale.quantity}</td>
                             <td className="px-4 py-3 text-right">{formatCurrency(sale.price)}</td>

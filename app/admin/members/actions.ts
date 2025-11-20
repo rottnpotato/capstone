@@ -1,9 +1,10 @@
 'use server';
 
 import { db } from '@/db/connection';
-import { Members, Users, Roles, MemberActivities, Transactions } from '@/db/schema';
-import { eq, lte, and, sql } from 'drizzle-orm';
+import { Members, Users, MemberActivities } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
+import bcrypt from 'bcryptjs';
 import { EmailService } from '@/lib/email';
 import { MemberRepository } from '@/db/repositories';
 
@@ -38,23 +39,62 @@ export async function AddMember(data: {
   userId?: number | null;
   initialCredit: number;
   creditLimit: number;
+  password?: string;
 }): Promise<{ success: boolean; message?: string }> {
   try {
-    await db.insert(Members).values({
-      Name: data.name,
-      Email: data.email,
-      Phone: data.phone,
-      Address: data.address,
-      UserId: data.userId,
-      CreditBalance: data.initialCredit.toString(),
-      CreditLimit: data.creditLimit.toString(),
-      Status: 'active', // Default status
+    return await db.transaction(async (tx) => {
+      let finalUserId = data.userId;
+
+      // Scenario 1: A password is provided and no existing user is linked.
+      // We need to create a new user account.
+      if (data.password && (!finalUserId || finalUserId === 0)) {
+        // Check if a user with this email already exists
+        const existingUser = await tx.query.Users.findFirst({
+          where: eq(Users.Email, data.email),
+        });
+
+        if (existingUser) {
+          throw new Error("A user with this email already exists. Please link the existing account or use a different email.");
+        }
+
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(data.password, 10);
+
+        // Create the new user with a 'Member' role (assuming RoleId 3 is 'Member')
+        // You may need to adjust the RoleId based on your database setup.
+        const newUser = await tx.insert(Users).values({
+          Name: data.name,
+          Email: data.email,
+          PasswordHash: hashedPassword,
+          RoleId: 3, // IMPORTANT: Assuming 3 is the RoleId for 'Member'
+        }).returning({ id: Users.UserId });
+
+        finalUserId = newUser[0].id;
+      }
+
+      // Now, create the member record, linking it to either the
+      // newly created user or the one selected from the dropdown.
+      await tx.insert(Members).values({
+        Name: data.name,
+        Email: data.email,
+        Phone: data.phone,
+        Address: data.address,
+        UserId: finalUserId,
+        CreditBalance: data.initialCredit.toString(),
+        CreditLimit: data.creditLimit.toString(),
+        Status: 'active', // Default status
+      });
+
+      revalidatePath('/admin/members');
+      return { success: true };
     });
-    revalidatePath('/admin/members');
-    return { success: true };
   } catch (error: any) {
     console.error("Error adding member:", error);
-    return { success: false, message: error.message || "Database error." };
+    // Return a more specific error message if it's a unique constraint violation
+    if (error.code === '23505') { // PostgreSQL unique violation error code
+      return { success: false, message: "A member with this email already exists." };
+    }
+    return { success: false, message: error.message || "An unexpected database error occurred." };
   }
 }
 
@@ -121,7 +161,10 @@ export async function AcceptCreditPayment(data: {
   const memberIdNum = parseInt(data.memberId, 10);
 
   return await db.transaction(async (tx) => {
-    const member = await MemberRepository.GetById(memberIdNum, true, tx);
+    // Use the transaction 'tx' to query the member and lock the row for update.
+    const member = await tx.query.Members.findFirst({
+      where: eq(Members.MemberId, memberIdNum),
+    });
 
     if (!member) {
       throw new Error("Member not found.");

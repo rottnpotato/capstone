@@ -91,6 +91,8 @@ export const Products = pgTable('Products', {
   Image: text('Image'),
   Supplier: varchar('Supplier', { length: 255 }),
   ExpiryDate: timestamp('ExpiryDate', { withTimezone: true }),
+  DiscountType: varchar('DiscountType', { length: 20 }), // 'percentage' or 'fixed'
+  DiscountValue: decimal('DiscountValue', { precision: 10, scale: 2 }).default('0.00'),
   IsActive: boolean('IsActive').default(true).notNull(),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),

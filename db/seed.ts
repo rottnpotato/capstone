@@ -1,6 +1,9 @@
 import { db } from './connection';
 import { Roles, Users, Categories, Products, Members, Transactions, TransactionItems, Events, MemberActivities } from './schema';
 import bcrypt from 'bcrypt';
+import * as dotenv from 'dotenv';
+
+dotenv.config({ path: '.env.local' });
 
 /**
  * Seed the database with initial data

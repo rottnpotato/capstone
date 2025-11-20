@@ -46,34 +46,26 @@ export class MemberRepository {
    * @param forUpdate - If true, locks the row for an update transaction
    * @param tx - Optional transaction object
    */
-  static async GetById(memberId: number, forUpdate: boolean = false, tx?: DbOrTx) {
-    const dbConnection = tx || db;
-    try {
-      let query = dbConnection
-        .select({
-          ...getTableColumns(Members),
-          UserName: Users.Name,
-          UserEmail: Users.Email,
-          RoleName: Roles.Name,
-        })
-        .from(Members)
-        .leftJoin(Users, eq(Members.UserId, Users.UserId))
-        .leftJoin(Roles, eq(Users.RoleId, Roles.RoleId));
+static async GetById(memberId: number) {
+  try {
+    // Much safer — no joins, no locks, no hanging queries
+    const results = await db
+      .select({
+        MemberId: Members.MemberId,
+        Name: Members.Name,
+        Email: Members.Email,
+        CreditLimit: Members.CreditLimit,
+        CreditBalance: Members.CreditBalance
+      })
+      .from(Members)
+      .where(eq(Members.MemberId, memberId));
 
-      if (forUpdate) {
-        // Drizzle doesn't directly support .for('update') on joined queries this way.
-        // A raw query is a reliable way to lock the row.
-        await dbConnection.execute(sql`SELECT "MemberId" FROM "Members" WHERE "MemberId" = ${memberId} FOR UPDATE`);
-      }
-
-      const results = await query.where(eq(Members.MemberId, memberId));
-
-      return results.length > 0 ? results[0] : null;
-    } catch (error) {
-      console.error(`Error getting member by ID ${memberId}:`, error);
-      throw error;
-    }
+    return results.length > 0 ? results[0] : null;
+  } catch (error) {
+    console.error(`Error getting member by ID ${memberId}:`, error);
+    return null;
   }
+}
 
   /**
    * Get a member by email

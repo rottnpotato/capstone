@@ -72,6 +72,16 @@ const addMemberFormSchema = z.object({
   userId: z.string().optional(),
   initialCredit: z.coerce.number().nonnegative().default(0),
   creditLimit: z.coerce.number().nonnegative().default(0),
+  password: z.string().optional(),
+}).refine(data => {
+  // If a userId is not provided (meaning we are creating a new user login), a password is required.
+  if (!data.userId || data.userId === "0") {
+    return data.password && data.password.length >= 8;
+  }
+  return true;
+}, {
+  message: "Password must be at least 8 characters long when not linking to an existing user.",
+  path: ["password"], // Attach the error to the password field
 });
 
 const paymentFormSchema = z.object({
@@ -223,6 +233,7 @@ export default function AdminMembersPage() {
       userId: "",
       initialCredit: 0,
       creditLimit: 0,
+      password: "",
     },
   });
 
@@ -485,6 +496,7 @@ export default function AdminMembersPage() {
         userId: userId,
         initialCredit: values.initialCredit,
         creditLimit: values.creditLimit,
+        password: values.password, // Pass the password to the server action
       });
       
       if (!result.success) {
@@ -591,7 +603,7 @@ export default function AdminMembersPage() {
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between mb-8">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Member Management</h1>
-              <p className="text-gray-600">Manage cooperative members ({totalCount} total)</p>
+              <p className="text-gray-600">Manage Cooperative Members ({totalCount} Total)</p>
             </div>
             <div className="flex gap-2">
               <Button
@@ -838,6 +850,22 @@ export default function AdminMembersPage() {
                     <FormControl>
                       <Input placeholder="Email Address" type="email" {...field} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={addMemberForm.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Password</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Set an initial password" type="password" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Required if not linking to an existing user. Must be 8+ characters.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

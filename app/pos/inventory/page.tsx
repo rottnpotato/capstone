@@ -1,13 +1,14 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import { motion } from "framer-motion"
-import { Search, Plus, Package, ArrowUpDown, MoreHorizontal, Edit, Trash2, AlertCircle, Image as ImageIcon,Archive } from "lucide-react"
+import { useState, useRef, useEffect, ReactNode } from "react"
+import { motion, AnimatePresence } from "framer-motion"
+import { Search, Plus, Package, ArrowUpDown, MoreHorizontal, Edit, Trash2, AlertCircle, Image as ImageIcon, Archive } from "lucide-react"
 import { Navbar } from "@/components/ui/navbar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { io, Socket } from "socket.io-client"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -100,6 +101,16 @@ const getStockStatus = (stock: number) => {
   return { color: 'text-green-500', badge: null, bgColor: 'bg-green-100' };
 };
 
+interface AlertData {
+  type: 'lowStock' | 'expiry' | 'expired';
+  title: string;
+  message: string;
+  icon: ReactNode;
+  className: string;
+  count: number;
+  filterType: 'lowStock' | 'expiringSoon' | 'expired';
+}
+
 export default function InventoryPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("all")
@@ -109,6 +120,7 @@ export default function InventoryPage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [isProductDetailModalOpen, setIsProductDetailModalOpen] = useState(false)
   const [isEditMode, setIsEditMode] = useState(false)
+  const [isEditProductModalOpen, setIsEditProductModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
   const [newProductImage, setNewProductImage] = useState<string | null>(null)
@@ -116,6 +128,9 @@ export default function InventoryPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editFileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
+  const [alerts, setAlerts] = useState<AlertData[]>([]);
+  const [currentAlertIndex, setCurrentAlertIndex] = useState(0);
+  const [alertFilter, setAlertFilter] = useState<'lowStock' | 'expiringSoon' | 'expired' | null>(null);
   
   // Add a function to check for products near expiration
   const checkForNearExpiryProducts = (productsList: Product[]) => {
@@ -269,10 +284,10 @@ export default function InventoryPage() {
             return {
               id: (product.ProductId || product.id || '').toString(),
               name: product.Name || product.name || 'Unnamed Product',
-              price: parseFloat(product.Price || product.price || 0),
-              basePrice: parseFloat(product.BasePrice || product.basePrice || 0),
+              price: parseFloat(product.Price || product.price || '0'),
+              basePrice: parseFloat(product.BasePrice || product.basePrice || '0'),
               profitType: product.ProfitType || product.profitType || 'percentage',
-              profitValue: parseFloat(product.ProfitValue || product.profitValue || 0),
+              profitValue: parseFloat(product.Price || product.price || '0') - parseFloat(product.BasePrice || product.basePrice || '0'),
               category: category,
               image: product.Image || product.image || '/placeholder.svg',
               stock: parseInt(product.StockQuantity || product.stock || 0),
@@ -351,7 +366,96 @@ export default function InventoryPage() {
     fetchCategories()
 
     fetchProducts()
+
+    // Initialize socket connection
+    const socket: Socket = io();
+
+    // Listen for real-time product updates
+    socket.on('product_updated', (updatedProduct: Product) => {
+      console.log('Product update received:', updatedProduct);
+      setProducts(prevProducts =>
+        prevProducts.map(p => (p.id === updatedProduct.id ? { ...p, ...updatedProduct } : p))
+      );
+      toast({
+        title: "Inventory Updated",
+        description: `${updatedProduct.name} has been updated in real-time.`,
+      });
+    });
+
+    socket.on('connect', () => {
+      console.log('Connected to inventory socket');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Disconnected from inventory socket');
+    });
+
+    // Cleanup on unmount
+    return () => {
+      socket.disconnect();
+    };
   }, [toast])
+
+  useEffect(() => {
+    const lowStockProducts = products.filter(p => p.stock < 30);
+    const expiringProducts = products.filter(p => p.expiryDate && isExpiringSoon(p.expiryDate) && !isExpired(p.expiryDate));
+    const expiredProducts = products.filter(p => p.expiryDate && isExpired(p.expiryDate));
+
+    const availableAlerts: AlertData[] = [];
+
+    if (expiredProducts.length > 0) {
+      availableAlerts.push({
+        type: 'expired',
+        title: 'Expired Items Alert (Click to view)',
+        message: `${expiredProducts.length} products have expired. Please remove them from inventory.`,
+        icon: <AlertCircle className="h-5 w-5 text-red-700 flex-shrink-0 mt-0.5" />,
+        className: 'border-red-300 bg-red-100',
+        count: expiredProducts.length,
+        filterType: 'expired',
+      });
+    }
+
+    if (expiringProducts.length > 0) {
+      availableAlerts.push({
+        type: 'expiry',
+        title: 'Expiry Alert (Click to view)',
+        message: `${expiringProducts.length} products are expiring within 7 days.`,
+        icon: <AlertCircle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />,
+        className: 'border-amber-200 bg-amber-50',
+        count: expiringProducts.length,
+        filterType: 'expiringSoon',
+      });
+    }
+
+    if (lowStockProducts.length > 0) {
+      availableAlerts.push({
+        type: 'lowStock',
+        title: 'Low Stock Alert (Click to view)',
+        message: `${lowStockProducts.length} products are running low on stock. Consider restocking soon.`,
+        icon: <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />,
+        className: 'border-red-200 bg-red-50',
+        count: lowStockProducts.length,
+        filterType: 'lowStock',
+      });
+    }
+
+    setAlerts(availableAlerts);
+    setCurrentAlertIndex(0);
+  }, [products]);
+
+  // Note: The isExpiringSoon function in this file checks for 7 days, 
+  // while the admin page checks for 30. The alert message here reflects the 7-day check.
+  // The logic for expired items is new for this page.
+
+  useEffect(() => {
+    if (alerts.length > 1) {
+      const interval = setInterval(() => {
+        setCurrentAlertIndex(prevIndex => (prevIndex + 1) % alerts.length);
+      }, 5000); // Change alert every 5 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [alerts.length]);
 
   // Get unique categories from products
   const categories = ["all", ...Array.from(new Set(category.map((category) => category.name)))]
@@ -361,7 +465,13 @@ export default function InventoryPage() {
     .filter((product) => {
       const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase())
       const matchesCategory = selectedCategory === "all" || product.category === selectedCategory
-      return matchesSearch && matchesCategory
+
+      const matchesAlertFilter = !alertFilter ||
+        (alertFilter === 'lowStock' && product.stock < 30) ||
+        (alertFilter === 'expiringSoon' && product.expiryDate && isExpiringSoon(product.expiryDate) && !isExpired(product.expiryDate)) ||
+        (alertFilter === 'expired' && product.expiryDate && isExpired(product.expiryDate));
+
+      return matchesSearch && matchesCategory && matchesAlertFilter;
     })
     .sort((a, b) => {
       let comparison = 0
@@ -376,6 +486,21 @@ export default function InventoryPage() {
         case "stock":
           comparison = a.stock - b.stock
           break
+        case "expiryDate": {
+          const dateA = a.expiryDate ? new Date(a.expiryDate).getTime() : null
+          const dateB = b.expiryDate ? new Date(b.expiryDate).getTime() : null
+
+          if (dateA === null && dateB === null) {
+            comparison = 0
+          } else if (dateA === null) {
+            comparison = 1 // Sort nulls to the end
+          } else if (dateB === null) {
+            comparison = -1 // Sort nulls to the end
+          } else {
+            comparison = dateA - dateB
+          }
+          break
+        }
         default:
           comparison = 0
       }
@@ -805,6 +930,7 @@ export default function InventoryPage() {
       // Close the modal
       setIsProductDetailModalOpen(false)
       setIsEditMode(false)
+      setIsEditProductModalOpen(false);
       
       // Check for products near expiration
       checkForNearExpiryProducts(updatedProducts)
@@ -1256,7 +1382,7 @@ export default function InventoryPage() {
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between mb-8">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Inventory Management</h1>
-              <p className="text-gray-600">Manage and track product inventory</p>
+              <p className="text-gray-600">Manage And Track Product Inventory</p>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
@@ -1305,6 +1431,7 @@ export default function InventoryPage() {
                   <SelectItem value="name">Name</SelectItem>
                   <SelectItem value="price">Price</SelectItem>
                   <SelectItem value="stock">Stock</SelectItem>
+                  <SelectItem value="expiryDate">Expiry Date</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -1314,21 +1441,48 @@ export default function InventoryPage() {
             </div>
           </div>
 
-          {/* Low Stock Alert */}
-          {products.length > 0 && (
-            <Card className="mb-6 border-red-200 bg-red-50">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h3 className="font-medium text-gray-900">Low Stock Alert</h3>
-                    <p className="text-sm text-gray-600">
-                      {products.filter(p => p.stock < 30).length} products are running low on stock. Consider restocking soon.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          {alertFilter && (
+            <div className="mb-6 flex items-center justify-center">
+              <Badge variant="secondary" className="p-2 text-sm">
+                Filtering by: {
+                  { lowStock: 'Low Stock', expiringSoon: 'Expiring Soon', expired: 'Expired' }[alertFilter]
+                }
+                <Button variant="ghost" size="sm" className="h-auto p-0 ml-2 text-red-500 hover:bg-transparent" onClick={() => setAlertFilter(null)}>
+                  &times; Clear
+                </Button>
+              </Badge>
+            </div>
+          )}
+
+          {/* Animated Alerts Widget */}
+          {alerts.length > 0 && (
+            <div className="relative h-20 mb-6 overflow-hidden">
+              <AnimatePresence initial={false}>
+                <motion.div
+                  key={alerts[currentAlertIndex].type}
+                  initial={{ y: '100%', opacity: 0 }}
+                  animate={{ y: '0%', opacity: 1 }}
+                  exit={{ y: '-100%', opacity: 0 }}
+                  transition={{ duration: 0.5, ease: 'easeInOut' }}
+                  className="absolute w-full"
+                >
+                  <Card 
+                    className={`${alerts[currentAlertIndex].className} cursor-pointer hover:shadow-md transition-shadow`}
+                    onClick={() => setAlertFilter(alerts[currentAlertIndex].filterType)}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-2">
+                        {alerts[currentAlertIndex].icon}
+                        <div>
+                          <h3 className="font-medium text-gray-900">{alerts[currentAlertIndex].title}</h3>
+                          <p className="text-sm text-gray-600">{alerts[currentAlertIndex].message}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </AnimatePresence>
+            </div>
           )}
 
           {/* Products Table */}
@@ -1378,6 +1532,20 @@ export default function InventoryPage() {
                           </button>
                         </th>
                         <th className="py-3 px-4 text-left">Status</th>
+                        <th className="py-3 px-4 text-left">
+                          <button
+                            className="flex items-center gap-1"
+                            onClick={() => {
+                              setSortBy("expiryDate")
+                              toggleSortOrder()
+                            }}
+                          >
+                            Expiry Date
+                            {sortBy === "expiryDate" && (
+                              <ArrowUpDown className={`h-3 w-3 transition-transform ${sortOrder === "desc" ? "rotate-180" : ""}`} />
+                            )}
+                          </button>
+                        </th>
                         <th className="py-3 px-4 text-left">Last Updated</th>
                         <th className="py-3 px-4 text-center">Actions</th>
                       </tr>
@@ -1389,7 +1557,11 @@ export default function InventoryPage() {
                             key={product.id}
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            className={`border-b hover:bg-gray-50 cursor-pointer ${!product.isActive ? 'bg-gray-50 text-gray-500' : ''}`}
+                            className={`border-b hover:bg-gray-50 cursor-pointer transition-colors
+                              ${!product.isActive ? 'bg-gray-100 text-gray-500' : 
+                                isExpired(product.expiryDate) ? 'bg-red-50 hover:bg-red-100' : 
+                                isExpiringSoon(product.expiryDate) ? 'bg-amber-50 hover:bg-amber-100' : ''
+                              }`}
                             onClick={() => handleProductClick(product)}
                           >
                             <td className="py-3 px-4">
@@ -1404,7 +1576,7 @@ export default function InventoryPage() {
                                     sizes="40px"
                                   />
                                 </div>
-                                <span className="font-medium">{product.name}</span>
+                                <span className="font-medium capitalize">{product.name}</span>
                               </div>
                             </td>
                             <td className="py-3 px-4 text-gray-600 font-mono text-sm">{product.sku}</td>
@@ -1414,21 +1586,9 @@ export default function InventoryPage() {
                             <td className="py-3 px-4 font-medium">₱{product.price.toFixed(2)}</td>
                             <td className="py-3 px-4">
                               <div className="flex flex-col">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`font-medium ${getStockStatus(product.stock).color}`}>
-                                    {product.stock}
-                                  </span>
-                                  {getStockStatus(product.stock).badge && (
-                                    <Badge className={`${getStockStatus(product.stock).bgColor} ${getStockStatus(product.stock).color} border-0 text-xs`}>
-                                      {getStockStatus(product.stock).badge}
-                                    </Badge>
-                                  )}
-                                </div>
-                                {product.expiryDate && (
-                                  <span className={`text-xs ${isExpired(product.expiryDate) ? 'text-red-500' : isExpiringSoon(product.expiryDate) ? 'text-amber-500' : ''}`}>
-                                    Exp: {formatDate(product.expiryDate) || 'N/A'}
-                                  </span>
-                                )}
+                                <span className={`font-medium ${getStockStatus(product.stock).color}`}>
+                                  {product.stock}
+                                </span>
                               </div>
                             </td>
                             <td className="py-3 px-4">
@@ -1441,6 +1601,9 @@ export default function InventoryPage() {
                                   Archived
                                 </Badge>
                               )}
+                            </td>
+                            <td className={`py-3 px-4 text-sm ${isExpired(product.expiryDate) ? 'text-red-500' : isExpiringSoon(product.expiryDate) ? 'text-amber-500' : ''}`}>
+                              {formatDate(product.expiryDate) || 'N/A'}
                             </td>
                             <td className="py-3 px-4 text-gray-600">{product.lastRestocked}</td>
                             <td className="py-3 px-4">
@@ -1498,7 +1661,7 @@ export default function InventoryPage() {
                       ) : (
                         <tr>
                           <td colSpan={7} className="py-10 text-center">
-                            <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                            <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" /> 
                             <h3 className="text-lg font-medium text-gray-900">No products found</h3>
                             <p className="text-gray-500">Try adjusting your search or filters</p>
                           </td>
@@ -1568,7 +1731,7 @@ export default function InventoryPage() {
 
                     <div className="grid gap-2">
                       <div className="flex justify-between items-start">
-                        <h3 className="text-xl font-bold text-gray-900">{selectedProduct.name}</h3>
+                        <h3 className="text-xl font-bold text-gray-900 capitalize">{selectedProduct.name}</h3>
                         <Badge className="capitalize">{selectedProduct.category}</Badge>
                       </div>
 
@@ -1897,10 +2060,7 @@ export default function InventoryPage() {
           )}
 
           <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button variant="outline" className="sm:flex-1" onClick={() => {
-              setIsProductDetailModalOpen(false);
-              setIsEditMode(false);
-            }}>
+            <Button variant="outline" className="sm:flex-1" onClick={() => setIsProductDetailModalOpen(false)}>
               Cancel
             </Button>
             {isEditMode ? (

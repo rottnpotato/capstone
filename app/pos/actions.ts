@@ -1,4 +1,27 @@
 'use server'
+// Prevent blocking repository calls from freezing the POS UI
+async function withTimeout<T>(promise: Promise<T>, ms = 15000): Promise<{
+  ok?: T;
+  timedOut?: true;
+  error?: string;
+}> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<{ timedOut: true }>((resolve) =>
+    timer = setTimeout(() => resolve({ timedOut: true }), ms)
+  );
+
+  try {
+    const result = await Promise.race([promise, timeout]) as any;
+    clearTimeout(timer!);
+
+    if (result && result.timedOut) return { timedOut: true };
+    return { ok: result };
+  } catch (err: any) {
+    clearTimeout(timer!);
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 
 import { db } from '@/db/connection'; // Assuming this is the correct db import
 import { MemberRepository, JoinedMemberResult } from '@/db/repositories'; // Import JoinedMemberResult
@@ -16,6 +39,7 @@ export interface Product {
   Price: number;
   basePrice: number;
   Category: string;
+  CategoryId: string;
   Image: string;
   Barcode: string;
   Stock: number;
@@ -73,7 +97,8 @@ async function fetchAndMapProducts(whereClause?: any): Promise<Product[]> {
       Name: product.Products.Name,
       Price: parseFloat(product.Products.Price),
       basePrice: parseFloat(product.Products.BasePrice || '0'),
-      Category: product.Categories?.Name?.toLowerCase() || "uncategorized",
+      Category: product.Categories?.Name || "uncategorized",
+      CategoryId: product.Categories?.CategoryId.toString() || "",
       Image: product.Products.Image || "",
       Barcode: product.Products.Sku,
       Stock: product.Products.StockQuantity,
@@ -95,13 +120,13 @@ export async function getProducts(): Promise<Product[]> {
 }
 
 // Get products by category
-export async function getProductsByCategory(categoryName: string): Promise<Product[]> {
-  if (categoryName === "all") {
+export async function getProductsByCategory(categoryId: string): Promise<Product[]> {
+  if (categoryId === "all") {
     return getProducts();
   }
 
   const whereClause = and(
-    eq(Categories.Name, categoryName),
+    eq(Categories.CategoryId, parseInt(categoryId)),
     eq(Products.IsActive, true)
   );
   return fetchAndMapProducts(whereClause);
@@ -121,10 +146,10 @@ export async function searchProducts(searchQuery: string): Promise<Product[]> {
 }
 
 // Get all categories
-export async function getCategories(): Promise<string[]> {
+export async function getCategories(): Promise<{ Id: string; Name: string }[]> {
   try {
     const categoriesData = await db.select().from(Categories);
-    return categoriesData.map(category => category.Name.toLowerCase());
+    return categoriesData.map(category => ({ Id: category.CategoryId.toString(), Name: category.Name }));
   } catch (error) {
     console.error("Error fetching categories:", error);
     return [];
@@ -247,15 +272,40 @@ export async function createTransaction(
   items: { ProductId: number; Quantity: number; Price: number; basePrice: number }[],
   totalAmount: number,
   paymentMethod: string,
-  userId: number, // Default cashier ID - would typically come from auth context
-  memberId?: number, 
+  userId: number,
+  memberId?: number,
   manualDiscount?: number
 ): Promise<{ success: boolean; transactionId?: string; error?: string }> {
-  // Use a try-catch block to handle errors from the atomic transaction
-  try {
-    let result;
 
-    // Format items data
+  console.log("=== [TX] FUNCTION ENTERED ===");
+  console.log("[TX] raw items payload:", JSON.stringify(items).slice(0, 2000)); // safe short print
+
+
+  console.log("=== [TX] createTransaction START ===");
+  console.log("[TX] Input:", { memberId, paymentMethod, itemsCount: items.length, totalAmount });
+  try {
+    // Fetch customer name BEFORE the transaction to avoid deadlocks.
+    // The transaction might lock the member row, and fetching it again later can cause a hang.
+    let customerName = "Guest Customer";
+    if (memberId) {
+      console.log("[TX] Prefetch member (guarded) memberId:", memberId);
+      try {
+        const guardedMember = await withTimeout(MemberRepository.GetById(memberId), 8000);
+        if (guardedMember.timedOut) {
+          console.error("[TX] MemberRepository.GetById timed out");
+        } else if (guardedMember.error) {
+          console.error("[TX] MemberRepository.GetById error:", guardedMember.error);
+        } else {
+          const member = guardedMember.ok;
+          console.log("[TX] MemberRepository.GetById result:", member ? { MemberId: member.MemberId, Name: member.Name } : null);
+          if (member) customerName = member.Name;
+        }
+      } catch (e) {
+        console.error("Could not pre-fetch member name, will proceed with 'Guest Customer'.", e);
+      }
+    }
+
+
     const transactionItems = items.map((item) => ({
       ProductId: item.ProductId,
       Quantity: item.Quantity,
@@ -263,77 +313,60 @@ export async function createTransaction(
       BasePriceAtTimeOfSale: (item.basePrice || 0).toFixed(2),
       Profit: (((item.Price || 0) - (item.basePrice || 0)) * item.Quantity).toFixed(2),
     }));
-
+    
+    const transactionData: any = {
+      UserId: userId,
+      TotalAmount: totalAmount.toFixed(2),
+      PaymentMethod: paymentMethod,
+      ManualDiscountAmount: manualDiscount?.toFixed(2),
+    };
+ 
+    if (memberId) {
+      transactionData.MemberId = memberId;
+    }
+ 
+    let result;
     if (paymentMethod === 'credit' && memberId) {
       // Use the new atomic method for credit transactions
       result = await TransactionRepository.processCreditTransaction(
-        {
-          UserId: userId, // No change needed here as we use the named property
-          MemberId: memberId,
-          TotalAmount: totalAmount.toFixed(2),
-          PaymentMethod: paymentMethod,
-          ManualDiscountAmount: manualDiscount?.toFixed(2),
-        },
+        transactionData, 
         transactionItems
       );
     } else {
-      // Use the existing (but now less safe) method for non-credit transactions.
-      // Ideally, this should also be converted to an atomic transaction.
-      const transactionData = {
-        UserId: userId,
-        MemberId: memberId, // No change needed here
-        TotalAmount: totalAmount.toFixed(2),
-        PaymentMethod: paymentMethod,
-        ManualDiscountAmount: manualDiscount?.toFixed(2),
-      };
+      // Handles:
+      // 1. Cash transactions with a member.
+      // 2. All transactions without a member (guest checkout).
       result = await TransactionRepository.CreateWithItems(transactionData, transactionItems);
-
-      // Manually update stock for non-credit transactions
-      for (const item of items) {
-        const product = await ProductRepository.GetById(item.ProductId);
-        if (product) {
-          const newStockQuantity = product.Products.StockQuantity - item.Quantity;
-          await ProductRepository.UpdateStock(item.ProductId, newStockQuantity);
-
-          // Check if stock is low after this transaction
-          const STOCK_THRESHOLD = 10;
-          if (newStockQuantity <= STOCK_THRESHOLD) {
-            const { SendLowStockNotification } = await import('@/lib/notifications');
-            await SendLowStockNotification(
-              item.ProductId,
-              product.Products.Name,
-              newStockQuantity
-            );
-          }
-        }
-      }
     }
-
+ 
     if (!result || !result.transaction) {
       throw new Error("Transaction failed to process.");
+    }
+ 
+    // The stock update is now handled within the atomic transaction methods in the repository.
+    // This loop is now only for post-transaction logic like sending notifications.
+    for (const item of items) {
+      // We still need to check the final stock level to send notifications.
+      const result = await ProductRepository.GetById(item.ProductId);
+      const product = result?.Products;
+      const STOCK_THRESHOLD = 10;
+      if (product && product.StockQuantity <= STOCK_THRESHOLD) {
+        // Dynamically import to avoid circular dependencies
+        const { SendLowStockNotification } = await import('@/lib/notifications');
+        await SendLowStockNotification(item.ProductId, product.Name, product.StockQuantity as number);
+      }
     }
 
     // Send purchase notification to admins
     try {
-      if (memberId) {
-        const member = await MemberRepository.GetById(memberId);
-        if (member) {
-          await SendPurchaseNotification(
-            result.transaction.TransactionId,
-            member.Name,
-            totalAmount,
-            items.length
-          );
-        }
-      } else {
-        // For non-member purchases, still send notification with generic info
-        await SendPurchaseNotification(
-          result.transaction.TransactionId,
-          "Guest Customer",
-          totalAmount,
-          items.length
-        );
-      }
+      // Centralized notification call
+      await SendPurchaseNotification(
+        result.transaction.TransactionId,
+        customerName,
+        totalAmount,
+        items.length
+      );
+
     } catch (notifError) {
       console.error("Error sending purchase notification:", notifError);
       // Don't fail the transaction if notification fails
@@ -347,7 +380,7 @@ export async function createTransaction(
     console.error("Error creating transaction:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error occurred"
+      error: error instanceof Error ? error.message : String(error)
     };
   }
 }
