@@ -62,7 +62,9 @@ export default function MemberPurchasesPage() {
           setError("An error occurred while fetching purchase data.");
         }
       } else { // User is not logged in (user is null)
-        setError("You must be logged in to view this page.");
+        // Redirect to login if session is invalid but we are on a protected page
+        window.location.href = '/login';
+        return;
       }
       setIsLoading(false);
     };

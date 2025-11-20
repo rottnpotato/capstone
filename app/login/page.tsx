@@ -32,7 +32,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (state?.success && state.redirectUrl) {
-      router.push(state.redirectUrl);
+      // Use window.location.href to ensure a full page refresh
+      // This guarantees that the new cookies are sent with the request
+      window.location.href = state.redirectUrl;
     }
   }, [state, router]);
 

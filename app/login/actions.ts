@@ -47,10 +47,10 @@ export async function LoginUser(
   else redirectUrl = '/login'; // Default if role is unknown
 
   // This call will throw an internal exception that Next.js handles for the redirect.
-  redirect(redirectUrl);
+  // redirect(redirectUrl);
 
   // Although redirect() throws, it's good practice for type-safety
   // to have a return statement that matches the function's signature.
   // This part of the code will not be reached.
-  return { success: true, message: "Redirecting...", redirectUrl };
+  return { success: true, message: "Login successful", redirectUrl };
 }

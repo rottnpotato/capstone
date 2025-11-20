@@ -26,7 +26,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const fetchSession = async () => {
       try {
-        const response = await fetch('/api/auth/session');
+        const response = await fetch('/api/auth/session', {
+          cache: 'no-store',
+          headers: {
+            'Pragma': 'no-cache'
+          }
+        });
         if (response.ok) {
           const data = await response.json();
           if (data.success) {
