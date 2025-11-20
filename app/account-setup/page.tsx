@@ -8,9 +8,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Suspense } from "react"
+// ...existing code...
 import { Label } from "@/components/ui/label"
 
-export default function AccountSetupPage() {
+function AccountSetupContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const token = searchParams?.get("token") // Add optional chaining
@@ -234,5 +236,13 @@ export default function AccountSetupPage() {
         </Card>
       </motion.div>
     </div>
+  )
+}
+
+export default function AccountSetupPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-amber-500" /></div>}>
+      <AccountSetupContent />
+    </Suspense>
   )
 } 
