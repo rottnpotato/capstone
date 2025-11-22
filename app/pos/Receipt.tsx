@@ -44,7 +44,7 @@ export const Receipt: React.FC<ReceiptProps> = ({ data }) => {
           <div key={item.Id} className="flex justify-between my-1">
             <div>
               <p className="font-medium leading-tight capitalize">{item.Name}</p>
-              <p className="pl-2">{item.quantity} x ₱{item.Price.toFixed(2)}</p>
+              <p className="pl-2">{item.quantity} {item.selectedUnitName || ''} x ₱{item.Price.toFixed(2)}</p>
             </div>
             <p>₱{(item.quantity * item.Price).toFixed(2)}</p>
           </div>

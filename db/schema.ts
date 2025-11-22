@@ -86,7 +86,8 @@ export const Products = pgTable('Products', {
   Sku: varchar('Sku', { length: 100 }).notNull().unique(),
   Price: decimal('Price', { precision: 10, scale: 2 }).notNull(),
   BasePrice: decimal('BasePrice', { precision: 10, scale: 2 }).default('0.00').notNull(),
-  StockQuantity: integer('StockQuantity').default(0).notNull(),
+  StockQuantity: decimal('StockQuantity', { precision: 10, scale: 2 }).default('0.00').notNull(),
+  Unit: varchar('Unit', { length: 50 }).default('pcs').notNull(),
   CategoryId: integer('CategoryId').notNull().references(() => Categories.CategoryId),
   Image: text('Image'),
   Supplier: varchar('Supplier', { length: 255 }),
@@ -98,12 +99,31 @@ export const Products = pgTable('Products', {
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const ProductUnits = pgTable('ProductUnits', {
+  ProductUnitId: serial('ProductUnitId').primaryKey(),
+  ProductId: integer('ProductId').notNull().references(() => Products.ProductId),
+  Name: varchar('Name', { length: 50 }).notNull(), // e.g., "Sack", "Box"
+  ConversionFactor: decimal('ConversionFactor', { precision: 10, scale: 2 }).notNull(), // e.g., 50 (1 Sack = 50 Base Units)
+  Price: decimal('Price', { precision: 10, scale: 2 }), // Optional override price for this unit
+  Barcode: varchar('Barcode', { length: 100 }),
+  CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
+  UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const productUnitsRelations = relations(ProductUnits, ({ one }) => ({
+  Product: one(Products, {
+    fields: [ProductUnits.ProductId],
+    references: [Products.ProductId],
+  }),
+}));
+
 export const productsRelations = relations(Products, ({ one, many }) => ({
   Category: one(Categories, {
     fields: [Products.CategoryId],
     references: [Categories.CategoryId],
   }),
   TransactionItems: many(TransactionItems),
+  ProductUnits: many(ProductUnits),
 }));
 
 export const Transactions = pgTable('Transactions', {
@@ -131,9 +151,11 @@ export const TransactionItems = pgTable('TransactionItems', {
   TransactionItemId: serial('TransactionItemId').primaryKey(),
   TransactionId: integer('TransactionId').notNull().references(() => Transactions.TransactionId),
   ProductId: integer('ProductId').notNull().references(() => Products.ProductId),
-  Quantity: integer('Quantity').notNull(),
+  Quantity: decimal('Quantity', { precision: 10, scale: 2 }).notNull(),
   PriceAtTimeOfSale: decimal('PriceAtTimeOfSale', { precision: 10, scale: 2 }).notNull(),
   BasePriceAtTimeOfSale: decimal('BasePriceAtTimeOfSale', { precision: 10, scale: 2 }).default('0.00').notNull(),
+  Unit: varchar('Unit', { length: 50 }),
+  ConversionFactor: decimal('ConversionFactor', { precision: 10, scale: 2 }).default('1.00'),
   Profit: decimal('Profit', { precision: 10, scale: 2 }).default('0.00').notNull(),
   CreatedAt: timestamp('CreatedAt', { withTimezone: true }).defaultNow().notNull(),
   UpdatedAt: timestamp('UpdatedAt', { withTimezone: true }).defaultNow().notNull(),

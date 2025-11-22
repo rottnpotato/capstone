@@ -96,6 +96,30 @@ export class TransactionRepository {
       const transactionItems = items.map(item => ({ ...item, TransactionId: transactionId }));
       await tx.insert(TransactionItems).values(transactionItems);
 
+      // Deduct stock
+      for (const item of items) {
+        const product = await tx.query.Products.findFirst({
+          where: eq(Products.ProductId, item.ProductId)
+        });
+        
+        if (product) {
+          // Calculate deduction: Quantity * ConversionFactor
+          const factor = parseFloat(String(item.ConversionFactor || 1));
+          const qty = parseFloat(String(item.Quantity));
+          const deduction = qty * factor;
+          
+          const currentStock = parseFloat(String(product.StockQuantity));
+          const newStock = currentStock - deduction;
+          
+          // Check for negative stock
+          if (newStock < 0) throw new Error(`Insufficient stock for product ${product.Name}. Available: ${currentStock}, Required: ${deduction}`);
+
+          await tx.update(Products)
+            .set({ StockQuantity: newStock })
+            .where(eq(Products.ProductId, item.ProductId));
+        }
+      }
+
       return { transaction: newTransaction[0] };
     });
   }

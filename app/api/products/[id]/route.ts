@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/connection';
-import { Products, Categories } from '@/db/schema';
+import { Products, Categories, ProductUnits } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { ProductRepository } from '@/db/repositories/ProductRepository';
 import { SendLowStockNotification, SendExpiryWarningNotification } from '@/lib/notifications';
@@ -355,6 +355,7 @@ export async function PUT(
         Price: body.price,
         BasePrice: body.basePrice,
         StockQuantity: body.stock || 0,
+        Unit: body.unit || 'pcs',
         CategoryId: categoryId,
         Image: body.image || null,
         Supplier: body.supplier || null,
@@ -372,6 +373,23 @@ export async function PUT(
         status: 'error',
         message: 'Product not found'
       }, { status: 404 });
+    }
+
+    // Handle ProductUnits update
+    if (body.productUnits) {
+       // Delete existing units for this product
+       await db.delete(ProductUnits).where(eq(ProductUnits.ProductId, productId));
+       
+       // Insert new units if any
+       if (Array.isArray(body.productUnits) && body.productUnits.length > 0) {
+         await db.insert(ProductUnits).values(body.productUnits.map((u: any) => ({
+           ProductId: productId,
+           Name: u.name,
+           ConversionFactor: u.conversionFactor,
+           Price: u.price || null,
+           Barcode: u.barcode || null
+         })));
+       }
     }
     
     // Format the response to match the frontend model
@@ -424,4 +442,4 @@ export async function PUT(
       message: `Error updating product: ${error.message || 'Unknown error'}`
     }, { status: 500 });
   }
-} 
+}

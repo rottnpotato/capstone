@@ -41,6 +41,14 @@ import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { desc } from "drizzle-orm"
 
+interface ProductUnit {
+  id?: string
+  name: string
+  conversionFactor: number
+  price?: number | null
+  barcode?: string | null
+}
+
 // Product type definition
 interface Product {
   id: string
@@ -50,6 +58,8 @@ interface Product {
   profitValue: number
   category: string
   stock: number
+  unit: string
+  productUnits: ProductUnit[]
   description: string
   supplier: string
   lastRestocked: string
@@ -264,6 +274,8 @@ export default function AdminInventoryPage() {
     basePrice: "",
     profitValue: "",
     stock: "",
+    unit: "pcs",
+    productUnits: [] as ProductUnit[],
     supplier: "",
     sku: "",
     description: "",
@@ -279,6 +291,8 @@ export default function AdminInventoryPage() {
     basePrice: "",
     profitValue: "",
     stock: "",
+    unit: "pcs",
+    productUnits: [] as ProductUnit[],
     supplier: "",
     description: "",
     sku: "",
@@ -316,6 +330,7 @@ export default function AdminInventoryPage() {
     expiryDate: "",
   })
 
+  const [stockUpdateUnit, setStockUpdateUnit] = useState("base");
   
   // Calculate price based on base price and profit settings
   const calculatePrice = (basePrice: string, profitValue: string): number => {
@@ -404,7 +419,9 @@ export default function AdminInventoryPage() {
               profitType: product.ProfitType || product.profitType || 'fixed',
               category: category,
               image: product.Image || product.image || '/placeholder.svg',
-              stock: parseInt(product.StockQuantity || product.stock || 0),
+              stock: parseFloat(product.StockQuantity || product.stock || 0),
+              unit: product.Unit || product.unit || 'pcs',
+              productUnits: product.ProductUnits || product.productUnits || [],
               description: product.Description || product.description || '',
               supplier: product.Supplier || product.supplier || 'No supplier',
               lastRestocked: formatDate(product.LastRestocked || product.lastRestocked) || new Date().toLocaleDateString('en-US', {
@@ -565,7 +582,8 @@ export default function AdminInventoryPage() {
   // Handle product click to view details
   const handleProductClick = (product: Product) => {
     setSelectedProduct(product)
-    setUpdatedStock(product.stock.toString()) // Initialize with current stock
+    setUpdatedStock("") // Clear input
+    setStockUpdateUnit("base") // Reset unit
     setStockUpdateError("") // Clear any previous errors
     setIsEditMode(false) // Default to view mode when clicking a product
     setIsProductDetailModalOpen(true)
@@ -579,6 +597,8 @@ export default function AdminInventoryPage() {
       // profitType: "fixed", // Default to fixed as per previous change
       profitValue: product.profitValue.toString(),
       stock: product.stock.toString(),
+      unit: product.unit,
+      productUnits: product.productUnits,
       supplier: product.supplier,
       description: product.description,
       sku: product.sku,
@@ -627,14 +647,83 @@ export default function AdminInventoryPage() {
     toast({ title: "SKU Generated", description: `New SKU: ${sku}` });
   };
 
-  const handleAddProduct = () => {
-    // TODO: Logic to add product
-    console.log("Adding Product:", newProduct);
-    toast({
-      title: "Product Added",
-      description: `${newProduct.name} has been added.`,
-    });
-    setIsAddProductModalOpen(false);
+  const handleAddProduct = async () => {
+    // Basic validation
+    if (!newProduct.name || !newProduct.price || !newProduct.category) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all required fields.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newProduct,
+          price: parseFloat(newProduct.price),
+          basePrice: parseFloat(newProduct.basePrice),
+          stock: parseFloat(newProduct.stock || '0'),
+          // unit and productUnits are passed directly
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to add product');
+      }
+
+      const data = await response.json();
+      
+      toast({
+        title: "Product Added",
+        description: `${newProduct.name} has been added successfully.`,
+      });
+      
+      // Reset form
+      setNewProduct({
+        name: "",
+        category: "",
+        price: "",
+        basePrice: "",
+        profitValue: "",
+        stock: "",
+        unit: "pcs",
+        productUnits: [],
+        supplier: "",
+        sku: "",
+        description: "",
+        expiryDate: "",
+        image: null,
+      });
+      
+      setIsAddProductModalOpen(false);
+      // Refresh products list (or rely on socket if implemented fully)
+      // For now, let's just reload the page or re-fetch
+      // Ideally we should update the state, but re-fetching is safer
+      // fetchProducts(); // We can't easily call fetchProducts here as it's inside useEffect
+      // But we can trigger a reload or just wait for socket if it works.
+      // Let's just reload the window for simplicity in this context, or better, add the new product to state.
+      if (data.product) {
+         // We need to map the response product to our frontend model
+         // But for now, let's just reload to be safe
+         window.location.reload();
+      }
+
+    } catch (error) {
+      console.error("Error adding product:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to add product",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const validateEditForm = (): boolean => {
@@ -747,6 +836,8 @@ export default function AdminInventoryPage() {
       // profitType: "fixed", // Set default profit type
       profitValue: product.profitValue.toString(),
       stock: product.stock.toString(),
+      unit: product.unit,
+      productUnits: product.productUnits,
       supplier: product.supplier,
       description: product.description,
       sku: product.sku,
@@ -929,6 +1020,67 @@ export default function AdminInventoryPage() {
       });
 
       doc.save('inventory_report.pdf');
+    }
+  };
+
+  const handleUpdateStock = async () => {
+    if (!selectedProduct || !updatedStock) return;
+    
+    const qtyToAdd = parseFloat(updatedStock);
+    if (isNaN(qtyToAdd) || qtyToAdd <= 0) {
+      setStockUpdateError("Please enter a valid quantity");
+      return;
+    }
+
+    let conversionFactor = 1;
+    if (stockUpdateUnit !== 'base') {
+      // Check if stockUpdateUnit is an ID or Name (depending on how we set the value)
+      // In the SelectItem, we used u.id or u.name.
+      // Let's try to find by ID first, then Name.
+      const unit = selectedProduct.productUnits.find(u => 
+        (u.id && u.id.toString() === stockUpdateUnit) || u.name === stockUpdateUnit
+      );
+      if (unit) {
+        conversionFactor = unit.conversionFactor;
+      }
+    }
+
+    const totalToAdd = qtyToAdd * conversionFactor;
+    const newStock = selectedProduct.stock + totalToAdd;
+
+    setIsLoading(true);
+    try {
+      // We can use PATCH to update just the stock
+      const response = await fetch(`/api/products/${selectedProduct.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock: newStock })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update stock');
+      }
+
+      toast({
+        title: "Stock Updated",
+        description: `Added ${qtyToAdd} ${stockUpdateUnit === 'base' ? selectedProduct.unit : stockUpdateUnit} (${totalToAdd} ${selectedProduct.unit}). New stock: ${newStock} ${selectedProduct.unit}`,
+      });
+      
+      // Update local state
+      const updatedProd = { ...selectedProduct, stock: newStock };
+      setSelectedProduct(updatedProd);
+      setProducts(products.map(p => p.id === selectedProduct.id ? updatedProd : p));
+      
+      setIsProductDetailModalOpen(false);
+    } catch (error) {
+      console.error("Error updating stock:", error);
+      toast({
+        title: "Error",
+        description: "Failed to update stock",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1485,6 +1637,53 @@ export default function AdminInventoryPage() {
               </div>
 
               <div className="grid gap-2">
+                <label className="text-sm font-medium">Base Unit</label>
+                <Input 
+                  placeholder="e.g. kg, pcs" 
+                  name="unit"
+                  value={newProduct.unit}
+                  onChange={(e) => setNewProduct({...newProduct, unit: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="border rounded-md p-4 bg-gray-50">
+              <h4 className="text-sm font-medium mb-2">Alternative Units (e.g. Sack)</h4>
+              <div className="grid grid-cols-3 gap-2 mb-2">
+                <Input placeholder="Unit Name (e.g. Sack)" id="new-unit-name" />
+                <Input type="number" placeholder="Conversion (e.g. 50)" id="new-unit-factor" />
+                <Button type="button" variant="secondary" onClick={() => {
+                  const nameInput = document.getElementById('new-unit-name') as HTMLInputElement;
+                  const factorInput = document.getElementById('new-unit-factor') as HTMLInputElement;
+                  if (nameInput.value && factorInput.value) {
+                    setNewProduct({
+                      ...newProduct,
+                      productUnits: [...newProduct.productUnits, {
+                        name: nameInput.value,
+                        conversionFactor: parseFloat(factorInput.value)
+                      }]
+                    });
+                    nameInput.value = '';
+                    factorInput.value = '';
+                  }
+                }}>Add Unit</Button>
+              </div>
+              <div className="space-y-2">
+                {newProduct.productUnits.map((u, idx) => (
+                  <div key={idx} className="flex justify-between items-center bg-white p-2 rounded border">
+                    <span className="text-sm">{u.name} = {u.conversionFactor} {newProduct.unit}</span>
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      const newUnits = [...newProduct.productUnits];
+                      newUnits.splice(idx, 1);
+                      setNewProduct({...newProduct, productUnits: newUnits});
+                    }}>&times;</Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
                 <label className="text-sm font-medium">Supplier</label>
                 <Input 
                   placeholder="Enter supplier name" 
@@ -1628,14 +1827,30 @@ export default function AdminInventoryPage() {
                       <div className="mt-4 pt-4 border-t border-gray-200">
                         <h4 className="font-medium text-gray-900 mb-2">Update Stock</h4>
                         <div className="grid gap-2">
-                          <label className="text-sm font-medium">New Stock Quantity</label>
-                          <Input 
-                            type="number"
-                            value={updatedStock}
-                            onChange={(e) => setUpdatedStock(e.target.value)}
-                            className={stockUpdateError ? 'border-red-300' : ''}
-                            min="0"
-                          />
+                          <label className="text-sm font-medium">Add Stock Quantity</label>
+                          <div className="flex gap-2">
+                            <Input 
+                              type="number"
+                              value={updatedStock}
+                              onChange={(e) => setUpdatedStock(e.target.value)}
+                              className={stockUpdateError ? 'border-red-300' : ''}
+                              min="0"
+                              placeholder="Qty to add"
+                            />
+                            <Select value={stockUpdateUnit} onValueChange={setStockUpdateUnit}>
+                              <SelectTrigger className="w-[140px]">
+                                <SelectValue placeholder="Unit" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="base">{selectedProduct.unit} (Base)</SelectItem>
+                                {selectedProduct.productUnits && selectedProduct.productUnits.map((u: any) => (
+                                  <SelectItem key={u.id || u.name} value={u.id ? u.id.toString() : u.name}>
+                                    {u.name} ({u.conversionFactor} {selectedProduct.unit})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
                           {stockUpdateError && <p className="text-xs text-red-500">{stockUpdateError}</p>}
                         </div>
                       </div>
@@ -1703,11 +1918,7 @@ export default function AdminInventoryPage() {
                 {isLoading ? "Saving..." : "Save Changes"}
               </Button>
             ) : (
-              <Button onClick={() => {
-                // Placeholder for stock update logic
-                toast({ title: "Stock Update", description: `Stock updated to ${updatedStock}` });
-                setIsProductDetailModalOpen(false);
-              }} disabled={isLoading}>
+              <Button onClick={handleUpdateStock} disabled={isLoading}>
                 Update Stock
               </Button>
             )}

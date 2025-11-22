@@ -32,6 +32,14 @@ import Image from "next/image"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // Product type definition
+interface ProductUnit {
+  id?: string
+  unit: string
+  conversionFactor: number
+  price: number
+  barcode?: string
+}
+
 interface Product {
   id: string
   name: string
@@ -48,6 +56,8 @@ interface Product {
   sku: string
   expiryDate?: string | null
   isActive?: boolean
+  unit?: string
+  productUnits?: ProductUnit[]
 }
 // Category type definition
 interface Category {
@@ -171,7 +181,17 @@ export default function InventoryPage() {
     supplier: "",
     description: "",
     sku: "",
-    expiryDate: ""
+    expiryDate: "",
+    unit: "pcs",
+    productUnits: [] as ProductUnit[]
+  })
+
+  // Temp state for adding a new unit
+  const [tempUnit, setTempUnit] = useState({
+    unit: "",
+    conversionFactor: "",
+    price: "",
+    barcode: ""
   })
   
   // Form state for editing product
@@ -206,7 +226,8 @@ export default function InventoryPage() {
     stock: "",
     image: "",
     sku: "",
-    expiryDate: ""
+    expiryDate: "",
+    unit: ""
   })
   
   // Form validation errors for edit product
@@ -300,7 +321,15 @@ export default function InventoryPage() {
               }),
               sku: product.Sku || product.sku || 'NO-SKU',
               expiryDate: expiryDate,
-              isActive: product.IsActive !== undefined ? product.IsActive : (product.isActive !== undefined ? product.isActive : true)
+              isActive: product.IsActive !== undefined ? product.IsActive : (product.isActive !== undefined ? product.isActive : true),
+              unit: product.Unit || product.unit || 'pcs',
+              productUnits: (product.ProductUnits || product.productUnits || []).map((u: any) => ({
+                id: u.ProductUnitId || u.id,
+                unit: u.Name || u.name || u.unit,
+                conversionFactor: parseFloat(u.ConversionFactor || u.conversionFactor || 0),
+                price: parseFloat(u.Price || u.price || 0),
+                barcode: u.Barcode || u.barcode
+              }))
             };
           });
           
@@ -960,7 +989,15 @@ export default function InventoryPage() {
       supplier: "",
       description: "",
       sku: "",
-      expiryDate: ""
+      expiryDate: "",
+      unit: "pcs",
+      productUnits: []
+    })
+    setTempUnit({
+      unit: "",
+      conversionFactor: "",
+      price: "",
+      barcode: ""
     })
     setNewProductImage(null)
     setErrors({
@@ -972,7 +1009,8 @@ export default function InventoryPage() {
       stock: "",
       image: "",
       sku: "",
-      expiryDate: ""
+      expiryDate: "",
+      unit: ""
     })
   }
   
@@ -1002,7 +1040,8 @@ export default function InventoryPage() {
       stock: "",
       image: "",
       sku: "",
-      expiryDate: ""
+      expiryDate: "",
+      unit: ""
     }
     
     let isValid = true
@@ -1014,6 +1053,11 @@ export default function InventoryPage() {
     
     if (!newProduct.category) {
       newErrors.category = "Category is required"
+      isValid = false
+    }
+
+    if (!newProduct.unit.trim()) {
+      newErrors.unit = "Base unit is required"
       isValid = false
     }
     
@@ -1092,7 +1136,14 @@ export default function InventoryPage() {
       description: newProduct.description,
       supplier: newProduct.supplier,
       sku: newProduct.sku,
-      expiryDate: newProduct.expiryDate || null
+      expiryDate: newProduct.expiryDate || null,
+      unit: newProduct.unit,
+      productUnits: newProduct.productUnits.map(u => ({
+        name: u.unit,
+        conversionFactor: u.conversionFactor,
+        price: u.price,
+        barcode: u.barcode
+      }))
     }
     
     // Include image if one was uploaded
@@ -1371,6 +1422,46 @@ export default function InventoryPage() {
         variant: "destructive"
       })
     }
+  }
+
+  // Handle adding a new unit
+  const handleAddUnit = () => {
+    if (!tempUnit.unit || !tempUnit.conversionFactor || !tempUnit.price) {
+      toast({
+        title: "Error",
+        description: "Please fill in all unit fields",
+        variant: "destructive"
+      })
+      return
+    }
+
+    const newUnit: ProductUnit = {
+      unit: tempUnit.unit,
+      conversionFactor: parseFloat(tempUnit.conversionFactor),
+      price: parseFloat(tempUnit.price),
+      barcode: tempUnit.barcode
+    }
+
+    setNewProduct({
+      ...newProduct,
+      productUnits: [...newProduct.productUnits, newUnit]
+    })
+
+    setTempUnit({
+      unit: "",
+      conversionFactor: "",
+      price: "",
+      barcode: ""
+    })
+  }
+
+  const handleRemoveUnit = (index: number) => {
+    const updatedUnits = [...newProduct.productUnits]
+    updatedUnits.splice(index, 1)
+    setNewProduct({
+      ...newProduct,
+      productUnits: updatedUnits
+    })
   }
 
   return (
@@ -2259,7 +2350,7 @@ export default function InventoryPage() {
               <p className="text-xs text-gray-500">The date when this product will expire. Leave empty if not applicable.</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="grid gap-2">
                 <label className="text-sm font-medium">Initial Stock</label>
                 <Input 
@@ -2275,6 +2366,18 @@ export default function InventoryPage() {
               </div>
 
               <div className="grid gap-2">
+                <label className="text-sm font-medium">Base Unit</label>
+                <Input 
+                  placeholder="e.g. pcs, kg" 
+                  name="unit"
+                  value={newProduct.unit}
+                  onChange={handleInputChange}
+                  className={errors.unit ? 'border-red-300' : ''}
+                />
+                {errors.unit && <p className="text-xs text-red-500">{errors.unit}</p>}
+              </div>
+
+              <div className="grid gap-2">
                 <label className="text-sm font-medium">Supplier</label>
                 <Input 
                   placeholder="Enter supplier name" 
@@ -2283,6 +2386,78 @@ export default function InventoryPage() {
                   onChange={handleInputChange}
                 />
               </div>
+            </div>
+
+            {/* Alternative Units Section */}
+            <div className="border rounded-md p-4 bg-gray-50">
+              <h3 className="text-sm font-medium mb-3">Alternative Units</h3>
+              
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="grid gap-1">
+                  <label className="text-xs text-gray-500">Unit Name</label>
+                  <Input 
+                    placeholder="e.g. Box, Sack" 
+                    value={tempUnit.unit}
+                    onChange={(e) => setTempUnit({...tempUnit, unit: e.target.value})}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <label className="text-xs text-gray-500">Conversion (1 Unit = ? Base)</label>
+                  <Input 
+                    type="number"
+                    placeholder="e.g. 12" 
+                    value={tempUnit.conversionFactor}
+                    onChange={(e) => setTempUnit({...tempUnit, conversionFactor: e.target.value})}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <label className="text-xs text-gray-500">Price (₱)</label>
+                  <Input 
+                    type="number"
+                    placeholder="0.00" 
+                    value={tempUnit.price}
+                    onChange={(e) => setTempUnit({...tempUnit, price: e.target.value})}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <label className="text-xs text-gray-500">Barcode (Optional)</label>
+                  <div className="flex gap-2">
+                    <Input 
+                      placeholder="Scan or type" 
+                      value={tempUnit.barcode}
+                      onChange={(e) => setTempUnit({...tempUnit, barcode: e.target.value})}
+                    />
+                    <Button size="sm" onClick={handleAddUnit} type="button">Add</Button>
+                  </div>
+                </div>
+              </div>
+
+              {newProduct.productUnits.length > 0 && (
+                <div className="mt-3 border-t pt-3">
+                  <h4 className="text-xs font-medium text-gray-500 mb-2">Added Units</h4>
+                  <div className="space-y-2">
+                    {newProduct.productUnits.map((unit, index) => (
+                      <div key={index} className="flex items-center justify-between bg-white p-2 rounded border text-sm">
+                        <div>
+                          <span className="font-medium">{unit.unit}</span>
+                          <span className="text-gray-500 mx-2">
+                            (1 {unit.unit} = {unit.conversionFactor} {newProduct.unit})
+                          </span>
+                          <span className="text-amber-600 font-medium">₱{unit.price.toFixed(2)}</span>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-6 w-6 p-0 text-red-500"
+                          onClick={() => handleRemoveUnit(index)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="grid gap-2">
@@ -2294,6 +2469,86 @@ export default function InventoryPage() {
                 value={newProduct.description}
                 onChange={handleInputChange}
               />
+            </div>
+
+            {/* Product Units Section */}
+            <div className="mt-4">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Product Units</h3>
+              
+              <div className="grid grid-cols-4 gap-4 mb-4">
+                <div>
+                  <label className="text-sm font-medium">Unit</label>
+                  <Input 
+                    placeholder="e.g. pcs" 
+                    value={tempUnit.unit}
+                    onChange={(e) => setTempUnit({ ...tempUnit, unit: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium">Conversion Factor</label>
+                  <Input 
+                    type="number" 
+                    placeholder="1" 
+                    value={tempUnit.conversionFactor}
+                    onChange={(e) => setTempUnit({ ...tempUnit, conversionFactor: e.target.value })}
+                    step="any"
+                    min="0"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium">Price</label>
+                  <Input 
+                    type="number" 
+                    placeholder="0.00" 
+                    value={tempUnit.price}
+                    onChange={(e) => setTempUnit({ ...tempUnit, price: e.target.value })}
+                    step="0.01"
+                    min="0"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium">Barcode (Optional)</label>
+                  <Input 
+                    placeholder="Enter barcode" 
+                    value={tempUnit.barcode}
+                    onChange={(e) => setTempUnit({ ...tempUnit, barcode: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <Button 
+                className="w-full mb-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600"
+                onClick={handleAddUnit}
+              >
+                Add Unit
+              </Button>
+
+              {newProduct.productUnits.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-md font-medium text-gray-900 mb-2">Existing Units</h4>
+                  <div className="space-y-2">
+                    {newProduct.productUnits.map((unit, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 rounded-md bg-gray-50 border">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{unit.unit}</p>
+                          <p className="text-xs text-gray-500">Conversion Factor: {unit.conversionFactor}</p>
+                          <p className="text-xs text-gray-500">Price: ₱{unit.price.toFixed(2)}</p>
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          size="icon"
+                          onClick={() => handleRemoveUnit(index)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

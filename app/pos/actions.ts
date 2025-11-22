@@ -33,6 +33,14 @@ import { SendPurchaseNotification } from '@/lib/notifications';
 
 import { GetCurrentSession } from '@/lib/auth';
 // Product interfaces
+export interface ProductUnit {
+  id: string;
+  name: string;
+  conversionFactor: number;
+  price?: number | null;
+  barcode?: string | null;
+}
+
 export interface Product {
   Id: string;
   Name: string;
@@ -43,6 +51,8 @@ export interface Product {
   Image: string;
   Barcode: string;
   Stock: number;
+  unit: string;
+  productUnits: ProductUnit[];
   Description: string;
   discountType?: "percentage" | "fixed"; // Added
   discountValue?: number; // Added
@@ -87,26 +97,37 @@ export interface Transaction {
 
 async function fetchAndMapProducts(whereClause?: any): Promise<Product[]> {
   try {
-    const productsData = await db.select()
-      .from(Products)
-      .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
-      .where(whereClause);
+    const productsData = await db.query.Products.findMany({
+      where: whereClause,
+      with: {
+        Category: true,
+        ProductUnits: true
+      }
+    });
 
     return productsData.map((product: any) => ({
-      Id: product.Products.ProductId.toString(),
-      Name: product.Products.Name,
-      Price: parseFloat(product.Products.Price),
-      basePrice: parseFloat(product.Products.BasePrice || '0'),
-      Category: product.Categories?.Name || "uncategorized",
-      CategoryId: product.Categories?.CategoryId.toString() || "",
-      Image: product.Products.Image || "",
-      Barcode: product.Products.Sku,
-      Stock: product.Products.StockQuantity,
-      Description: product.Products.Description || "",
-      discountType: product.Products.DiscountType as "percentage" | "fixed" | undefined,
-      discountValue: parseFloat(product.Products.DiscountValue || '0'),
-      ExpiryDate: product.Products.ExpiryDate ? new Date(product.Products.ExpiryDate).toISOString() : null,
-      IsActive: product.Products.IsActive
+      Id: product.ProductId.toString(),
+      Name: product.Name,
+      Price: parseFloat(product.Price),
+      basePrice: parseFloat(product.BasePrice || '0'),
+      Category: product.Category?.Name || "uncategorized",
+      CategoryId: product.Category?.CategoryId.toString() || "",
+      Image: product.Image || "",
+      Barcode: product.Sku,
+      Stock: parseFloat(product.StockQuantity),
+      unit: product.Unit || 'pcs',
+      productUnits: product.ProductUnits ? product.ProductUnits.map((u: any) => ({
+        id: u.ProductUnitId.toString(),
+        name: u.Name,
+        conversionFactor: parseFloat(u.ConversionFactor),
+        price: u.Price ? parseFloat(u.Price) : null,
+        barcode: u.Barcode
+      })) : [],
+      Description: product.Description || "",
+      discountType: product.DiscountType as "percentage" | "fixed" | undefined,
+      discountValue: parseFloat(product.DiscountValue || '0'),
+      ExpiryDate: product.ExpiryDate ? new Date(product.ExpiryDate).toISOString() : null,
+      IsActive: product.IsActive
     }));
   } catch (error) {
     console.error("Error fetching and mapping products:", error);

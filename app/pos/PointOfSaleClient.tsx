@@ -21,7 +21,13 @@ import { getCurrentUserData, UserProfileData } from "@/app/actions/userActions"
 import { Receipt } from "./Receipt"
 import "./print.css"
 
-type CartItem = Product & { quantity: number }
+export type CartItem = Product & { 
+  quantity: number;
+  selectedUnit: string;
+  selectedUnitName: string;
+  unitPrice: number;
+  conversionFactor: number;
+}
 
 export interface CompletedTransaction {
   transactionId: string;
@@ -59,6 +65,10 @@ export default function PointOfSaleClient() {
   const [isDiscountModalOpen, setDiscountModalOpen] = useState(false)
   const [manualDiscount, setManualDiscount] = useState(0)
   const [discountInput, setDiscountInput] = useState("")
+
+  // Unit Selection State
+  const [isUnitSelectionOpen, setUnitSelectionOpen] = useState(false)
+  const [productToSelectUnit, setProductToSelectUnit] = useState<Product | null>(null)
 
   const { toast } = useToast()
 
@@ -126,30 +136,47 @@ export default function PointOfSaleClient() {
   }
 
   const addToCart = (product: Product) => {
+    if (product.productUnits && product.productUnits.length > 0) {
+      setProductToSelectUnit(product);
+      setUnitSelectionOpen(true);
+    } else {
+      addItemToCart(product, 'base', product.unit || 'pcs', product.Price, 1);
+    }
+  }
+
+  const addItemToCart = (product: Product, unitId: string, unitName: string, price: number, factor: number) => {
     setCart((prevCart) => {
-      const existingItem = prevCart.find((item) => item.Id === product.Id)
+      const existingItem = prevCart.find((item) => item.Id === product.Id && item.selectedUnit === unitId)
       if (existingItem) {
         return prevCart.map((item) =>
-          item.Id === product.Id ? { ...item, quantity: item.quantity + 1 } : item
+          item.Id === product.Id && item.selectedUnit === unitId ? { ...item, quantity: item.quantity + 1 } : item
         )
       }
-      return [...prevCart, { ...product, quantity: 1 }]
+      return [...prevCart, { 
+        ...product, 
+        quantity: 1,
+        selectedUnit: unitId,
+        selectedUnitName: unitName,
+        unitPrice: price,
+        conversionFactor: factor,
+        Price: price // Override price for calculations
+      }]
     })
   }
 
-  const updateQuantity = (productId: string, newQuantity: number) => {
+  const updateQuantity = (productId: string, newQuantity: number, unitId?: string) => {
     setCart((prevCart) => {
       if (newQuantity <= 0) {
-        return prevCart.filter((item) => item.Id !== productId)
+        return prevCart.filter((item) => !(item.Id === productId && (unitId ? item.selectedUnit === unitId : true)))
       }
       return prevCart.map((item) =>
-        item.Id === productId ? { ...item, quantity: newQuantity } : item
+        item.Id === productId && (unitId ? item.selectedUnit === unitId : true) ? { ...item, quantity: newQuantity } : item
       )
     })
   }
 
-  const removeFromCart = (productId: string) => {
-    setCart((prevCart) => prevCart.filter((item) => item.Id !== productId))
+  const removeFromCart = (productId: string, unitId?: string) => {
+    setCart((prevCart) => prevCart.filter((item) => !(item.Id === productId && (unitId ? item.selectedUnit === unitId : true))))
   }
 
   const clearCart = () => {
@@ -161,11 +188,7 @@ export default function PointOfSaleClient() {
   }, [cart])
 
     const discount = useMemo(() => {
-    return cart.reduce((sum, item) => {
-      const originalPrice = item.basePrice > 0 ? item.basePrice : item.Price;
-      const itemDiscount = (originalPrice - item.Price) * item.quantity;
-      return sum + itemDiscount;
-    }, 0);
+    return 0;
   }, [cart]);
 
   const total = useMemo(() => {
@@ -420,9 +443,9 @@ export default function PointOfSaleClient() {
                           <p className="text-xs text-gray-500">{product.Category}</p>
                         </div>
                         <div className="mt-2 text-right">
-                          {product.discountValue && product.discountValue > 0 && product.basePrice > product.Price ? (
+                          {product.discountValue && product.discountValue > 0 ? (
                             <div className="flex flex-col items-end">
-                              <p className="text-xs text-gray-500 line-through">₱{product.basePrice.toFixed(2)}</p>
+                              {/* <p className="text-xs text-gray-500 line-through">₱{product.basePrice.toFixed(2)}</p> */}
                               <p className="font-bold text-lg text-red-600">₱{product.Price.toFixed(2)}</p>
                             </div>
                           ) : (
@@ -504,21 +527,30 @@ export default function PointOfSaleClient() {
               </div>
             ) : (
               <div className="divide-y">
-                {cart.map((item) => (
-                  <div key={item.Id} className="p-4 flex items-center">
+                {cart.map((item, idx) => (
+                  <div key={`${item.Id}-${item.selectedUnit}-${idx}`} className="p-4 flex items-center">
                     <div className="flex-grow">
                       <p className="font-medium capitalize">{item.Name}</p>
+                      <p className="text-xs text-gray-500">{item.selectedUnitName}</p>
                       <p className="text-sm text-gray-500">₱{item.Price.toFixed(2)}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateQuantity(item.Id, item.quantity - 1)}>
+                      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateQuantity(item.Id, item.quantity - 1, item.selectedUnit)}>
                         <Minus className="h-4 w-4" />
                       </Button>
-                      <span>{item.quantity}</span>
-                      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateQuantity(item.Id, item.quantity + 1)}>
+                      <Input 
+                        type="number" 
+                        className="w-16 h-8 text-center p-1 mx-1" 
+                        defaultValue={item.quantity} 
+                        onBlur={(e) => updateQuantity(item.Id, parseFloat(e.target.value), item.selectedUnit)}
+                        key={item.quantity}
+                        min="0"
+                        step="0.01"
+                      />
+                      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateQuantity(item.Id, item.quantity + 1, item.selectedUnit)}>
                         <Plus className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCart(item.Id)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => removeFromCart(item.Id, item.selectedUnit)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -535,10 +567,12 @@ export default function PointOfSaleClient() {
                   <span>Subtotal</span>
                   <span>₱{(subtotal + discount).toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm text-red-600">
-                  <span>Discount</span>
-                  <span>- ₱{discount.toFixed(2)}</span>
-                </div>
+                {discount > 0 && (
+                  <div className="flex justify-between items-center text-sm text-red-600">
+                    <span>Discount</span>
+                    <span>- ₱{discount.toFixed(2)}</span>
+                  </div>
+                )}
                 {manualDiscount > 0 && (
                   <div className="flex justify-between items-center text-sm text-blue-600">
                     <span>Manual Discount</span>
@@ -569,6 +603,58 @@ export default function PointOfSaleClient() {
           )}
         </div>
       </main>
+
+      {/* Unit Selection Modal */}
+      <Dialog open={isUnitSelectionOpen} onOpenChange={setUnitSelectionOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Select Unit</DialogTitle>
+            <DialogDescription>
+              Choose the unit for {productToSelectUnit?.Name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            {productToSelectUnit && (
+              <>
+                <Button 
+                  variant="outline" 
+                  className="justify-between h-auto py-3"
+                  onClick={() => {
+                    addItemToCart(productToSelectUnit, 'base', productToSelectUnit.unit || 'pcs', productToSelectUnit.Price, 1);
+                    setUnitSelectionOpen(false);
+                  }}
+                >
+                  <div className="text-left">
+                    <div className="font-medium">{productToSelectUnit.unit || 'Base Unit'}</div>
+                    <div className="text-xs text-gray-500">1 {productToSelectUnit.unit}</div>
+                  </div>
+                  <div className="font-bold">₱{productToSelectUnit.Price.toFixed(2)}</div>
+                </Button>
+                
+                {productToSelectUnit.productUnits && productToSelectUnit.productUnits.map((u: any) => (
+                  <Button 
+                    key={u.id} 
+                    variant="outline" 
+                    className="justify-between h-auto py-3"
+                    onClick={() => {
+                      // Calculate price if not set
+                      const price = u.price || (productToSelectUnit.Price * u.conversionFactor);
+                      addItemToCart(productToSelectUnit, u.id, u.name, price, u.conversionFactor);
+                      setUnitSelectionOpen(false);
+                    }}
+                  >
+                    <div className="text-left">
+                      <div className="font-medium">{u.name}</div>
+                      <div className="text-xs text-gray-500">{u.conversionFactor} {productToSelectUnit.unit}</div>
+                    </div>
+                    <div className="font-bold">₱{(u.price || (productToSelectUnit.Price * u.conversionFactor)).toFixed(2)}</div>
+                  </Button>
+                ))}
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Payment Modal */}
       <Dialog open={isPaymentModalOpen} onOpenChange={setPaymentModalOpen}>

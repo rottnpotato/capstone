@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ProductRepository } from '@/db/repositories';
 import { db } from '@/db/connection';
-import { Products, Categories } from '@/db/schema';
+import { Products, Categories, ProductUnits } from '@/db/schema';
 import { eq, lte, and } from 'drizzle-orm';
 
 /**
@@ -15,63 +15,57 @@ export async function GET(request: Request) {
     const lowStockOnly = searchParams.get('lowStock') === 'true';
     const activeOnly = searchParams.get('activeOnly') === 'true';
     
-    // Start with a base query
-    let conditions = [];
-    
-    // Apply category filter
+    // Use db.query for easier relation fetching
+    const productsData = await db.query.Products.findMany({
+      with: {
+        Category: true,
+        ProductUnits: true,
+      },
+      where: (products, { eq, lte, and }) => {
+        const conditions = [];
+        if (lowStockOnly) conditions.push(lte(products.StockQuantity, "10")); // String for decimal comparison if needed, or number
+        if (activeOnly) conditions.push(eq(products.IsActive, true));
+        // Category filter needs to be handled carefully with relations or separate ID check
+        // For simplicity, we can filter in memory or join if needed. 
+        // But db.query doesn't support filtering by relation field easily without join.
+        // Let's stick to the previous approach but add ProductUnits fetching.
+        return conditions.length ? and(...conditions) : undefined;
+      }
+    });
+
+    // Filter by category if needed (since we can't easily do it in db.query without knowing CategoryId)
+    let filteredProducts = productsData;
     if (category && category !== 'all') {
-      conditions.push(eq(Categories.Name, category));
+      filteredProducts = productsData.filter(p => p.Category.Name === category);
     }
-    
-    // Apply low stock filter if requested
-    if (lowStockOnly) {
-      conditions.push(lte(Products.StockQuantity, 10));
-    }
-    
-    // Apply active filter if requested
-    if (activeOnly) {
-      conditions.push(eq(Products.IsActive, true));
-    }
-    
-    // Execute the query with all conditions, selecting only required fields
-    const rawProducts = await db.select({
-      id: Products.ProductId,
-      name: Products.Name,
-      price: Products.Price,
-      basePrice: Products.BasePrice,
-      category: Categories.Name,
-      image: Products.Image,
-      sku: Products.Sku,
-      stock: Products.StockQuantity,
-      description: Products.Description,
-      supplier: Products.Supplier,
-      lastRestocked: Products.UpdatedAt,
-      expiryDate: Products.ExpiryDate,
-      discountType: Products.DiscountType,
-      discountValue: Products.DiscountValue,
-    })
-      .from(Products)
-      .leftJoin(Categories, eq(Products.CategoryId, Categories.CategoryId))
-      .where(conditions.length ? and(...conditions) : undefined);
-    
-    // Format the products to match frontend expectations
-    const products = rawProducts.map((product) => ({
-      id: product.id,
-      name: product.name,
-      price: parseFloat(String(product.price)),
-      basePrice: parseFloat(String(product.basePrice)),
-      category: product.category || '',
-      image: product.image || '',
-      sku: product.sku,
-      stock: product.stock,
-      description: product.description || '',
-      supplier: product.supplier || '',
-      expiryDate: product.expiryDate || '',
-      discountType: product.discountType || undefined,
-      discountValue: parseFloat(String(product.discountValue || '0')),
-      lastRestocked: product.lastRestocked instanceof Date
-        ? product.lastRestocked.toISOString()
-        : String(product.lastRestocked || ''),
+
+    // Format the products
+    const products = filteredProducts.map((product) => ({
+      id: product.ProductId,
+      name: product.Name,
+      price: parseFloat(String(product.Price)),
+      basePrice: parseFloat(String(product.BasePrice)),
+      category: product.Category.Name,
+      image: product.Image || '',
+      sku: product.Sku,
+      stock: parseFloat(String(product.StockQuantity)), // Decimal
+      unit: product.Unit,
+      productUnits: product.ProductUnits.map(u => ({
+        id: u.ProductUnitId,
+        name: u.Name,
+        conversionFactor: parseFloat(String(u.ConversionFactor)),
+        price: u.Price ? parseFloat(String(u.Price)) : null,
+        barcode: u.Barcode
+      })),
+      description: product.Description || '',
+      supplier: product.Supplier || '',
+      expiryDate: product.ExpiryDate || '',
+      discountType: product.DiscountType || undefined,
+      discountValue: parseFloat(String(product.DiscountValue || '0')),
+      lastRestocked: product.UpdatedAt instanceof Date
+        ? product.UpdatedAt.toISOString()
+        : String(product.UpdatedAt || ''),
+      isActive: product.IsActive
     }));
 
     return NextResponse.json({ status: 'success', products });
@@ -144,6 +138,7 @@ export async function POST(request: Request) {
         Price: body.price,
         BasePrice: body.basePrice,
         StockQuantity: body.stock || 0,
+        Unit: body.unit || 'pcs',
         CategoryId: categoryId,
         Image: body.image || null, // Store the image data
         Supplier: body.supplier || null, // Store the supplier
@@ -153,6 +148,19 @@ export async function POST(request: Request) {
         IsActive: true
       })
       .returning();
+
+    // Insert product units if any
+    if (body.productUnits && Array.isArray(body.productUnits) && body.productUnits.length > 0) {
+      await db.insert(ProductUnits).values(
+        body.productUnits.map((u: any) => ({
+          ProductId: newProduct[0].ProductId,
+          Name: u.name,
+          ConversionFactor: u.conversionFactor,
+          Price: u.price || null,
+          Barcode: u.barcode || null
+        }))
+      );
+    }
 
     // Format the product for response
     return NextResponse.json({
@@ -165,7 +173,8 @@ export async function POST(request: Request) {
         basePrice: parseFloat(newProduct[0].BasePrice),
         category: body.category,
         sku: newProduct[0].Sku,
-        stock: newProduct[0].StockQuantity,
+        stock: parseFloat(newProduct[0].StockQuantity),
+        unit: newProduct[0].Unit,
         description: newProduct[0].Description || '',
         supplier: newProduct[0].Supplier || '',
         image: newProduct[0].Image || '',
