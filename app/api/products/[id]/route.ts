@@ -141,13 +141,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (
       body.stock !== undefined && 
       body.stock <= 10 && 
-      (currentProduct.StockQuantity === null || currentProduct.StockQuantity > 10)
+      (currentProduct.StockQuantity === null || parseInt(currentProduct.StockQuantity) > 10)
     ) {
       try {
         await SendLowStockNotification(
           product.ProductId,
           product.Name,
-          product.StockQuantity
+          ((product.StockQuantity).includes('.')) ? parseFloat(product.StockQuantity) : parseInt(product.StockQuantity)
         );
       } catch (notifError) {
         console.error('Error sending low stock notification:', notifError);
